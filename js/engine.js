@@ -27,25 +27,25 @@
 
   // target: square | piece (beliebig, kein König) | own (eigene, kein König) | ownAny (eigene inkl. König) | enemy (gegnerisch, kein König)
   const ABILITIES = [
-    { id: 'skip', name: 'Zug-Skip', icon: '⏭️', cost: 6, desc: 'Der nächste Spieler setzt aus. Im Extra-Zug kann kein König geschlagen werden.' },
-    { id: 'blitz', name: 'Blitz', icon: '⚡', cost: 5, desc: 'Trifft eine zufällige gegnerische Figur (kein König).' },
-    { id: 'bomb', name: 'Bombe', icon: '💣', cost: 10, target: 'square', desc: 'Sprengt 3×3 Felder weg – auch deine eigenen Figuren!' },
-    { id: 'kamikaze', name: 'Kamikaze', icon: '🧨', cost: 4, target: 'own', desc: 'Eine eigene Figur explodiert und reißt alles um sich mit.' },
-    { id: 'teleport', name: 'Teleport', icon: '🌀', cost: 5, target: 'own', then: 'empty', desc: 'Beame eine eigene Figur auf ein beliebiges freies Feld.' },
-    { id: 'shield', name: 'Schild', icon: '🛡️', cost: 6, target: 'ownAny', desc: 'Eine eigene Figur (auch König) ist eine Runde unverwundbar.' },
-    { id: 'freeze', name: 'Freeze', icon: '❄️', cost: 4, target: 'enemy', desc: 'Friert eine gegnerische Figur für eine Runde ein.' },
-    { id: 'clone', name: 'Klon', icon: '👯', cost: 7, target: 'own', desc: 'Kopiert eine eigene Figur auf ein Nachbarfeld.' },
-    { id: 'mutate', name: 'Mutation', icon: '🧬', cost: 4, target: 'piece', desc: 'Verwandelt eine Figur (kein König) in eine zufällige andere.' },
-    { id: 'steal', name: 'Taschendieb', icon: '🦝', cost: 4, desc: 'Klaut ein Viertel der Punkte des reichsten Gegners (max. 6).' },
-    { id: 'quake', name: 'Erdbeben', icon: '🌋', cost: 7, desc: 'Alle Figuren wackeln in zufällige Richtungen.' },
-    { id: 'tornado', name: 'Tornado', icon: '🌪️', cost: 8, desc: 'Wirbelt bis zu 10 Figuren durcheinander.' },
-    { id: 'army', name: 'Bauern-Armee', icon: '🪖', cost: 6, desc: '3 neue eigene Bauern spawnen bei deiner Armee.' },
-    { id: 'sniper', name: 'Sniper', icon: '🎯', cost: 9, target: 'enemy', desc: 'Schaltet eine gegnerische Figur deiner Wahl aus (kein König).' },
-    { id: 'chain', name: 'Kettenblitz', icon: '🌩️', cost: 12, desc: 'Drei Blitze treffen zufällige gegnerische Figuren.' },
-    { id: 'poison', name: 'Gift', icon: '🧪', cost: 5, target: 'enemy', desc: 'Vergiftet eine Figur – sie stirbt nach zwei Runden.' },
-    { id: 'promote', name: 'Beförderung', icon: '👑', cost: 8, target: 'ownPawn', desc: 'Ein eigener Bauer wird sofort zur Dame.' },
-    { id: 'revive', name: 'Wiederbelebung', icon: '💫', cost: 7, desc: 'Holt eine verlorene Figur zurück aufs Brett.' },
-    { id: 'swap', name: 'Platztausch', icon: '🔁', cost: 6, target: 'own', then: 'enemy', desc: 'Eigene Figur tauscht den Platz mit einer gegnerischen.' },
+    { id: 'skip', cat: 'ctrl', name: 'Zug-Skip', icon: '⏭️', cost: 6, desc: 'Der nächste Spieler setzt aus. Im Extra-Zug kann kein König geschlagen werden.' },
+    { id: 'blitz', cat: 'atk', name: 'Blitz', icon: '⚡', cost: 5, desc: 'Trifft eine zufällige gegnerische Figur (kein König).' },
+    { id: 'bomb', cat: 'atk', name: 'Bombe', icon: '💣', cost: 10, target: 'square', desc: 'Sprengt 3×3 Felder weg – auch deine eigenen Figuren!' },
+    { id: 'kamikaze', cat: 'atk', name: 'Kamikaze', icon: '🧨', cost: 4, target: 'own', desc: 'Eine eigene Figur explodiert und reißt alles um sich mit.' },
+    { id: 'teleport', cat: 'ctrl', name: 'Teleport', icon: '🌀', cost: 5, target: 'own', then: 'empty', desc: 'Beame eine eigene Figur auf ein beliebiges freies Feld.' },
+    { id: 'shield', cat: 'sup', name: 'Schild', icon: '🛡️', cost: 6, target: 'ownAny', desc: 'Eine eigene Figur (auch König) ist eine Runde unverwundbar.' },
+    { id: 'freeze', cat: 'ctrl', name: 'Freeze', icon: '❄️', cost: 4, target: 'enemy', desc: 'Friert eine gegnerische Figur für eine Runde ein.' },
+    { id: 'clone', cat: 'sup', name: 'Klon', icon: '👯', cost: 7, target: 'own', desc: 'Kopiert eine eigene Figur auf ein Nachbarfeld.' },
+    { id: 'mutate', cat: 'sup', name: 'Mutation', icon: '🧬', cost: 4, target: 'piece', desc: 'Verwandelt eine Figur (kein König) in eine zufällige andere.' },
+    { id: 'steal', cat: 'eco', name: 'Taschendieb', icon: '🦝', cost: 4, desc: 'Klaut ein Viertel der Punkte des reichsten Gegners (max. 6).' },
+    { id: 'quake', cat: 'ctrl', name: 'Erdbeben', icon: '🌋', cost: 7, desc: 'Alle Figuren wackeln in zufällige Richtungen.' },
+    { id: 'tornado', cat: 'ctrl', name: 'Tornado', icon: '🌪️', cost: 8, desc: 'Wirbelt bis zu 10 Figuren durcheinander.' },
+    { id: 'army', cat: 'sup', name: 'Bauern-Armee', icon: '🪖', cost: 6, desc: '3 neue eigene Bauern spawnen bei deiner Armee.' },
+    { id: 'sniper', cat: 'atk', name: 'Sniper', icon: '🎯', cost: 9, target: 'enemy', desc: 'Schaltet eine gegnerische Figur deiner Wahl aus (kein König).' },
+    { id: 'chain', cat: 'atk', name: 'Kettenblitz', icon: '🌩️', cost: 12, desc: 'Drei Blitze treffen zufällige gegnerische Figuren.' },
+    { id: 'poison', cat: 'atk', name: 'Gift', icon: '🧪', cost: 5, target: 'enemy', desc: 'Vergiftet eine Figur – sie stirbt nach zwei Runden.' },
+    { id: 'promote', cat: 'sup', name: 'Beförderung', icon: '👑', cost: 8, target: 'ownPawn', desc: 'Ein eigener Bauer wird sofort zur Dame.' },
+    { id: 'revive', cat: 'sup', name: 'Wiederbelebung', icon: '💫', cost: 7, desc: 'Holt eine verlorene Figur zurück aufs Brett.' },
+    { id: 'swap', cat: 'ctrl', name: 'Platztausch', icon: '🔁', cost: 6, target: 'own', then: 'enemy', desc: 'Eigene Figur tauscht den Platz mit einer gegnerischen.' },
   ];
   const PASS_POINTS = 3;
 
@@ -262,6 +262,9 @@
     if (s.mode !== 'chaos' || n <= 0) return;
     s.players[who].points += n * (s.ply < s.doubleUntil ? 2 : 1);
   }
+  function delayFrom(fx, i, d) {
+    for (; i < fx.length; i++) fx[i].delay = (fx[i].delay || 0) + d;
+  }
   function lose(s, p) {
     if (p && p.type !== 'k' && s.players[p.owner]) s.players[p.owner].lost.push(p.type);
   }
@@ -333,7 +336,7 @@
     v.points = 0;
     if (s.skip === victim) s.skip = null;
     log(s, `💀 ${v.name} ist raus! ${pname(s, killer)} übernimmt ${n} Figuren${loot ? ` und ${loot} Punkte` : ''}.`);
-    fx.push({ type: 'banner', icon: '💀', title: `${v.name} ist raus!`, sub: `${pname(s, killer)} übernimmt die Armee`, sound: 'event' });
+    fx.push({ type: 'banner', ico: 'skull', title: `${v.name} ist raus!`, sub: `${pname(s, killer)} übernimmt die Armee`, sound: 'event' });
 
     const teamsLeft = [...new Set(s.players.filter((p) => p.alive).map((p) => p.team))];
     if (teamsLeft.length <= 1) {
@@ -418,7 +421,7 @@
     if (s.skip === next) {
       s.skip = null;
       log(s, `⏭️ ${pname(s, next)} wird übersprungen!`);
-      fx.push({ type: 'banner', icon: '⏭️', title: `${pname(s, next)} setzt aus!`, sub: 'Zug übersprungen', sound: 'skip' });
+      fx.push({ type: 'banner', ico: 'skip', title: `${pname(s, next)} setzt aus!`, sub: 'Zug übersprungen', sound: 'skip' });
       next = nextAlive(s, next);
       if (next === cur) { s.bonus = true; s.ep = null; }
     }
@@ -524,7 +527,7 @@
       case 'skip': {
         const victim = nextAlive(s, who);
         s.skip = victim;
-        fx.push({ type: 'banner', icon: '⏭️', title: 'ZUG-SKIP!', sub: `${pname(s, victim)} muss gleich aussetzen`, sound: 'skip' });
+        fx.push({ type: 'banner', ico: 'skip', title: 'Zug-Skip!', sub: `${pname(s, victim)} muss gleich aussetzen`, sound: 'skip' });
         break;
       }
       case 'blitz': {
@@ -537,11 +540,14 @@
         break;
       }
       case 'bomb': {
+        fx.push({ type: 'bombDrop', r: target.r, c: target.c });
+        const i0 = fx.length;
         fx.push({ type: 'explode', r: target.r, c: target.c, big: true });
         let n = 0;
         for (let dr = -1; dr <= 1; dr++)
           for (let dc = -1; dc <= 1; dc++)
             if (destroy(s, target.r + dr, target.c + dc, fx, 'boom', who)) n++;
+        delayFrom(fx, i0, 700);
         log(s, `💣 BOOM! ${me.name} sprengt ${n} Figur(en) weg.`);
         break;
       }
@@ -549,12 +555,15 @@
         const p = s.board[target.r][target.c];
         lose(s, p);
         s.board[target.r][target.c] = null;
+        fx.push({ type: 'fuse', r: target.r, c: target.c });
+        const i0 = fx.length;
         fx.push({ type: 'capture', r: target.r, c: target.c, color: me.color, kind: 'boom' });
         fx.push({ type: 'explode', r: target.r, c: target.c, big: false });
         let n = 0;
         for (let dr = -1; dr <= 1; dr++)
           for (let dc = -1; dc <= 1; dc++)
             if ((dr || dc) && destroy(s, target.r + dr, target.c + dc, fx, 'boom', who)) n++;
+        delayFrom(fx, i0, 650);
         log(s, `🧨 ${NAMES[p.type]} von ${me.name} geht hoch und nimmt ${n} Figur(en) mit!`);
         break;
       }
@@ -591,7 +600,7 @@
         cl.dir = p.dir.slice();
         if (cl.type === 'p' && atEdge(s, cl, r, c)) cl.type = 'q';
         s.board[r][c] = cl;
-        fx.push({ type: 'spawn', r, c });
+        fx.push({ type: 'clone', r, c, fr: target.r, fc: target.c });
         log(s, `👯 ${me.name} klont einen ${NAMES[p.type]}!`);
         break;
       }
@@ -602,15 +611,19 @@
         const p = s.board[target.r][target.c];
         fx.push({ type: 'snipe', r: target.r, c: target.c });
         log(s, `🎯 ${me.name} schaltet ${NAMES[p.type]} von ${pname(s, p.owner)} aus!`);
-        destroy(s, target.r, target.c, fx, 'zap', who);
+        const i0 = fx.length;
+        destroy(s, target.r, target.c, fx, 'shot', who);
+        delayFrom(fx, i0, 750);
         break;
       }
       case 'chain': {
         const c = shuffle(allPieces(s, (p) => enemies.includes(p.owner) && p.type !== 'k' && !shielded(s, p))).slice(0, 3);
         if (!c.length) return null;
         c.forEach((t, i) => {
-          fx.push({ type: 'blitz', r: t.r, c: t.c, delay: i * 280 });
+          const i0 = fx.length;
+          fx.push({ type: 'blitz', r: t.r, c: t.c });
           destroy(s, t.r, t.c, fx, 'zap', who);
+          delayFrom(fx, i0, i * 320);
         });
         log(s, `🌩️ Kettenblitz! ${c.length} Figuren gegrillt.`);
         break;
@@ -640,7 +653,7 @@
         const np = mk(s, type, who, true);
         if (np.type === 'p' && atEdge(s, np, r, c)) np.type = 'q';
         s.board[r][c] = np;
-        fx.push({ type: 'spawn', r, c });
+        fx.push({ type: 'revive', r, c });
         log(s, `💫 ${me.name} holt einen ${NAMES[type]} zurück!`);
         break;
       }
@@ -659,7 +672,7 @@
         const amt = Math.min(6, Math.floor(s.players[rich].points / 4));
         s.players[rich].points -= amt;
         me.points += amt;
-        fx.push({ type: 'coins' });
+        fx.push({ type: 'steal', from: rich, to: who, amt });
         log(s, `🦝 ${me.name} klaut ${amt} Punkte von ${pname(s, rich)}!`);
         break;
       }
@@ -685,7 +698,7 @@
           const pawn = mk(s, 'p', who, true);
           if (atEdge(s, pawn, r, c)) pawn.type = 'n';
           s.board[r][c] = pawn;
-          fx.push({ type: 'spawn', r, c });
+          fx.push({ type: 'spawn', r, c, kind: 'drop' });
         }
         log(s, `🪖 ${sq.length} neue Bauern von ${me.name} melden sich zum Dienst!`);
         break;
@@ -693,7 +706,7 @@
     }
     me.points -= ab.cost;
     s.abilityUsed = true;
-    fx.unshift({ type: 'ability', id, icon: ab.icon, name: ab.name, who });
+    fx.unshift({ type: 'ability', id, cat: ab.cat, name: ab.name, who });
     normalize(s, fx);
     s.ep = null;
     updateCheck(s);
@@ -717,7 +730,7 @@
   function randomEvent(s, fx) {
     const ev = pick(EVENTS);
     const big = s.n === 14;
-    fx.push({ type: 'banner', icon: ev.icon, title: ev.name, sub: ev.desc, sound: 'event' });
+    fx.push({ type: 'banner', ico: ev.id, title: ev.name, sub: ev.desc, sound: 'event' });
     log(s, `${ev.icon} EVENT: ${ev.name}!`);
     const alive = s.players.map((p, i) => i).filter((i) => s.players[i].alive);
     switch (ev.id) {

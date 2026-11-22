@@ -131,8 +131,8 @@
 
   function startBanner() {
     return state.mode === 'chaos'
-      ? { type: 'banner', icon: '🔥', title: 'Chaos-Schach!', sub: 'Schlag einen König, um seine Armee zu übernehmen', sound: 'event' }
-      : { type: 'banner', icon: '♟️', title: 'Los geht\'s!', sub: state.players.length === 2 ? 'Klassisches Schach' : 'Schlag die Könige deiner Gegner', sound: 'event' };
+      ? { type: 'banner', ico: 'fire', title: 'Chaos-Schach!', sub: 'Schlag einen König, um seine Armee zu übernehmen', sound: 'event' }
+      : { type: 'banner', ico: 'knight', title: 'Los geht\'s!', sub: state.players.length === 2 ? 'Klassisches Schach' : 'Schlag die Könige deiner Gegner', sound: 'event' };
   }
 
   // ---------- Host ----------
@@ -171,7 +171,7 @@
     } else {
       lobby[idx].conn = null;
       const fx = E.setOffline(state, idx, true) || [];
-      fx.push({ type: 'banner', icon: '📴', title: `${state.players[idx].name} ist weg`, sub: 'Seine Züge werden übersprungen' });
+      fx.push({ type: 'banner', ico: 'plug', title: `${state.players[idx].name} ist weg`, sub: 'Seine Züge werden übersprungen' });
       broadcastState(fx);
       render(fx);
     }
@@ -212,7 +212,7 @@
     }
   };
   Net.onClose = () => {
-    if (state) queueBanner({ icon: '🔌', title: 'Verbindung weg', sub: 'Der Host hat das Spiel verlassen' });
+    if (state) queueBanner({ ico: 'plug', title: 'Verbindung weg', sub: 'Der Host hat das Spiel verlassen' });
     else { lobbyStatus('Verbindung zum Raum verloren.', true); $('#btnJoin').disabled = false; }
   };
   Net.onError = (e) => {
@@ -248,7 +248,7 @@
       const offline = state.players.map((p) => p.offline);
       state = E.newGame({ mode: state.mode, teams: state.teams, names: state.players.map((p) => p.name) });
       offline.forEach((o, i) => { if (o) state.players[i].offline = true; });
-      fx = [{ type: 'banner', icon: '🔁', title: 'Revanche!', sub: 'Neues Spiel, neues Chaos', sound: 'event' }];
+      fx = [{ type: 'banner', ico: 'rematch', title: 'Revanche!', sub: 'Neues Spiel, neues Chaos', sound: 'event' }];
     }
     if (!fx) return;
     if (role === 'host') broadcastState(fx);
@@ -269,6 +269,7 @@
     const host = $('#squares');
     host.innerHTML = '';
     $('#pieces').innerHTML = '';
+    $('#decals').innerHTML = '';
     pieceEls.clear();
     squares = [];
     $('#board').style.setProperty('--n', n);
@@ -339,10 +340,21 @@
   function render(fx) {
     if (!state) return;
     if (builtN !== state.n) buildBoard();
-    const delayed = {};
-    for (const f of fx) if (f.type === 'capture' && f.delay) delayed[f.r + ',' + f.c] = f.delay;
+    const hints = { delayed: {}, warp: new Set(), from: {}, drop: new Set(), kill: {} };
+    let lastWho = null;
+    for (const f of fx) {
+      if (f.type === 'ability') lastWho = f.who;
+      if (f.type === 'capture') {
+        if (f.delay) hints.delayed[f.r + ',' + f.c] = f.delay;
+        hints.kill[f.r + ',' + f.c] = f.kind;
+      }
+      if (f.type === 'teleport') { hints.warp.add(f.r + ',' + f.c); hints.warp.add(f.r2 + ',' + f.c2); }
+      if (f.type === 'clone') hints.from[f.r + ',' + f.c] = [f.fr, f.fc];
+      if (f.type === 'spawn' && f.kind === 'drop') hints.drop.add(f.r + ',' + f.c);
+      if (f.type === 'bombDrop') f.who = lastWho;
+    }
     renderBoard();
-    renderPieces(delayed);
+    renderPieces(hints);
     renderPanels();
     processFx(fx);
   }
@@ -385,7 +397,8 @@
     el.classList.add(cls);
   }
 
-  function renderPieces(delayed) {
+  function renderPieces(hints) {
+    const delayed = hints.delayed;
     const layer = $('#pieces');
     const seen = new Set();
     const firstRender = pieceEls.size === 0;
@@ -398,17 +411,31 @@
         let el = pieceEls.get(p.id);
         const [vr, vc] = toView(r, c);
         const tf = `translate(${vc * 100}%, ${vr * 100}%)`;
+        const key = r + ',' + c;
         if (!el) {
           el = document.createElement('div');
           el.className = 'piece';
           el.innerHTML = '<span></span><i></i>';
           el.style.transition = 'none';
-          el.style.transform = tf;
+          const src = hints.from[key];
+          if (src) { const [fr, fc] = toView(src[0], src[1]); el.style.transform = `translate(${fc * 100}%, ${fr * 100}%)`; }
+          else el.style.transform = tf;
           layer.appendChild(el);
           void el.offsetWidth;
           el.style.transition = '';
           pieceEls.set(p.id, el);
-          if (!firstRender) restartAnim(el.firstChild, 'spawn');
+          if (!firstRender) restartAnim(el.firstChild, hints.drop.has(key) ? 'drop' : src ? 'ghost' : 'spawn');
+        } else if (el.style.transform !== tf) {
+          if (hints.warp.has(key)) {
+            el.style.transition = 'none';
+            el.style.transform = tf;
+            void el.offsetWidth;
+            el.style.transition = '';
+            restartAnim(el.firstChild, 'warp');
+          } else {
+            el.style.transform = tf;
+            restartAnim(el, 'landing');
+          }
         }
         el.style.transform = tf;
         el.dataset.pos = r + ',' + c;
@@ -433,9 +460,16 @@
       if (seen.has(id)) continue;
       pieceEls.delete(id);
       const d = delayed[el.dataset.pos] || 0;
+      const kind = hints.kill[el.dataset.pos];
+      const ang = Math.random() * Math.PI * 2;
+      const dist = kind === 'boom' ? 220 : 140;
+      el.style.setProperty('--dx', Math.cos(ang) * dist + '%');
+      el.style.setProperty('--dy', (Math.sin(ang) * dist * 0.5 - 160) + '%');
+      el.style.setProperty('--rot', (Math.random() < 0.5 ? -1 : 1) * (240 + Math.random() * 300) + 'deg');
+      el.style.zIndex = 5;
       setTimeout(() => {
-        el.classList.add('dying');
-        setTimeout(() => el.remove(), 600);
+        el.classList.add(kind === 'poison' || kind === 'burn' ? 'melting' : 'dying');
+        setTimeout(() => el.remove(), 750);
       }, d);
     }
   }
@@ -482,6 +516,7 @@
     $('#infoChips').innerHTML = info.join('');
 
     const pass = $('#btnPass');
+    if (!pass.dataset.ico) { pass.insertAdjacentHTML('afterbegin', Icons.svg('pass', 'btn-ico')); pass.dataset.ico = 1; }
     pass.classList.toggle('hidden', !chaos);
     pass.disabled = !canAct();
     pass.querySelector('.cost').textContent = '+' + E.PASS_POINTS * (state.ply < state.doubleUntil ? 2 : 1);
@@ -498,7 +533,7 @@
           b.className = 'ability';
           b.dataset.id = ab.id;
           b.title = ab.desc;
-          b.innerHTML = `<span class="aicon">${ab.icon}</span><span class="aname">${ab.name}</span><span class="acost">${ab.cost}</span>`;
+          b.innerHTML = `<span class="aicon cat-${ab.cat}">${Icons.svg(ab.id)}</span><span class="aname">${ab.name}</span><span class="acost">${ab.cost}</span>`;
           b.addEventListener('click', () => onAbility(ab));
           b.addEventListener('mouseenter', () => showDesc(ab));
           b.addEventListener('mouseleave', () => renderHint());
@@ -531,7 +566,7 @@
   }
 
   function showDesc(ab) {
-    $('#shopHint').innerHTML = `<b>${ab.icon} ${ab.name} · ${ab.cost} 🪙</b><br>${esc(ab.desc)}`;
+    $('#shopHint').innerHTML = `<b>${ab.name} · ${ab.cost} 🪙</b><br>${esc(ab.desc)}`;
   }
   function renderHint() {
     if (!state) return;
@@ -542,7 +577,7 @@
         square: 'ein Feld', own: 'eine eigene Figur', ownAny: 'eine eigene Figur', ownPawn: 'einen eigenen Bauern',
         enemy: 'eine gegnerische Figur', piece: 'eine Figur', empty: 'ein freies Feld',
       }[targeting.step === 2 ? ab.then : ab.target];
-      hint = `<b>${ab.icon} ${ab.name}</b><br>Wähle ${what}${ab.id === 'swap' && targeting.step === 2 ? ' zum Tauschen' : ''}.`;
+      hint = `<b>${ab.name}</b><br>Wähle ${what}${ab.id === 'swap' && targeting.step === 2 ? ' zum Tauschen' : ''}.`;
     } else if (canAct() && state.abilityUsed) hint = 'Fähigkeit benutzt – jetzt noch ziehen oder passen.';
     else hint = 'Eine Fähigkeit pro Zug. Sie beendet deinen Zug nicht.';
     $('#shopHint').innerHTML = hint;
@@ -593,100 +628,239 @@
     }
   }
 
+  const SKY = ['#e0f7ff', '#7df9ff', '#ffffff', '#b388ff'];
+  const ICE = ['#e3f6fc', '#a5e3f5', '#ffffff', '#5fc4e8'];
+  const TOX = ['#7ee35b', '#3a9d23', '#c8ff9e'];
+  const GOLD = ['#ffd60a', '#fff3b0', '#ffc300', '#f4c430'];
+  const VIOLET = ['#b388ff', '#7c4dff', '#e0d4ff', '#7df9ff'];
+
+  function chipCenter(i) {
+    const el = document.querySelectorAll('#players .pl')[i];
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return [r.left + r.width / 2, r.top + r.height / 2];
+  }
+  function boardCenter() {
+    const r = $('#board').getBoundingClientRect();
+    return [r.left + r.width / 2, r.top + r.height / 2, r.width];
+  }
+  function sqSize() {
+    return $('#board').getBoundingClientRect().width / state.n;
+  }
+  // Schwebendes Icon (DOM), z.B. Krone, Zzz
+  function floatIcon(x, y, html, cls) {
+    const el = document.createElement('div');
+    el.className = 'float-ico ' + (cls || '');
+    el.innerHTML = html;
+    el.style.left = x + 'px';
+    el.style.top = y + 'px';
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 1600);
+  }
+  // Brandfleck auf dem Brett
+  function scorch(r, c, size) {
+    const [vr, vc] = toView(r, c);
+    const el = document.createElement('div');
+    el.className = 'scorch';
+    const n = state.n, s = size || 1;
+    el.style.left = ((vc + 0.5) / n) * 100 + '%';
+    el.style.top = ((vr + 0.5) / n) * 100 + '%';
+    el.style.width = el.style.height = (s / n) * 100 + '%';
+    $('#decals').appendChild(el);
+    setTimeout(() => el.remove(), 6000);
+  }
+  function coinsFly(fromIdx, toIdx, amt) {
+    const a = chipCenter(fromIdx), b = chipCenter(toIdx);
+    if (!a || !b) return;
+    for (let i = 0; i < Math.max(1, Math.min(amt, 6)); i++) {
+      const el = document.createElement('div');
+      el.className = 'coin';
+      document.body.appendChild(el);
+      const mx = (a[0] + b[0]) / 2, my = Math.min(a[1], b[1]) - 60 - Math.random() * 40;
+      el.animate([
+        { transform: `translate(${a[0]}px, ${a[1]}px) scale(.6)`, opacity: 0 },
+        { transform: `translate(${a[0]}px, ${a[1]}px) scale(1)`, opacity: 1, offset: 0.1 },
+        { transform: `translate(${mx}px, ${my}px) scale(1.2)`, offset: 0.5 },
+        { transform: `translate(${b[0]}px, ${b[1]}px) scale(.8)`, opacity: 1, offset: 0.95 },
+        { transform: `translate(${b[0]}px, ${b[1]}px) scale(.4)`, opacity: 0 },
+      ], { duration: 800, delay: i * 90, easing: 'cubic-bezier(.5,0,.3,1)', fill: 'both' });
+      setTimeout(() => { el.remove(); if (i === 0) Sound.play('coin'); }, 900 + i * 90);
+    }
+  }
+  function pieceAt(r, c) {
+    return document.querySelector(`#pieces .piece[data-pos="${r},${c}"]`);
+  }
+
   function runFx(f) {
+    if (!state) return;
     const pos = f.r !== undefined ? center(f.r, f.c) : null;
-    const big = state && state.n === 14 ? 0.7 : 1;
+    const k = state.n === 14 ? 0.7 : 1;
+    const sq = sqSize();
     switch (f.type) {
-      case 'move': Sound.play('move'); break;
+      case 'move': {
+        Sound.play('move');
+        const lm = state.lastMove;
+        if (lm) setTimeout(() => {
+          const [x, y] = center(lm.tr, lm.tc);
+          FX.burst(x, y + sq * 0.3, { n: 10, colors: ['rgba(60,40,20,.5)', 'rgba(255,255,255,.6)'], speed: 2.2, size: 3, grav: -0.02, life: 25 });
+        }, 330);
+        break;
+      }
       case 'capture':
-        if (f.kind === 'boom' || f.kind === 'poison') {
-          FX.burst(pos[0], pos[1], { n: 25, colors: f.kind === 'poison' ? ['#7ee35b', '#3a9d23', '#c8ff9e'] : PCOL[f.color], speed: 6 * big, size: 6 * big });
-          if (f.kind === 'poison') Sound.play('burn');
+        if (f.kind === 'poison') {
+          FX.burst(pos[0], pos[1], { n: 30, colors: TOX, speed: 3, size: 6 * k, grav: -0.12, glow: true });
+          Sound.play('burn');
+        } else if (f.kind === 'boom') {
+          FX.debris(pos[0], pos[1], PCOL[f.color], 8);
         } else {
-          FX.burst(pos[0], pos[1], { n: 45, colors: PCOL[f.color].concat(['#ff5a36', '#f4c430']), speed: 8 * big, size: 7 * big, glow: true });
-          FX.ring(pos[0], pos[1], 'rgba(255,255,255,', 70 * big);
-          if (f.kind !== 'zap') Sound.play('capture');
+          FX.burst(pos[0], pos[1], { n: 40, colors: PCOL[f.color].concat(['#ff5a36', '#f4c430']), speed: 8 * k, size: 7 * k, glow: true });
+          FX.debris(pos[0], pos[1], PCOL[f.color], 8);
+          FX.ring(pos[0], pos[1], 'rgba(255,255,255,', 70 * k);
+          if (f.kind !== 'zap' && f.kind !== 'shot') Sound.play('capture');
           shake(false);
         }
         break;
+      case 'bombDrop': {
+        const from = (f.who !== null && f.who !== undefined && chipCenter(f.who)) || [pos[0], pos[1] - 300];
+        Sound.play('whoosh');
+        FX.lob(from[0], from[1], pos[0], pos[1], 40);
+        break;
+      }
       case 'explode':
         FX.explosion(pos[0], pos[1], f.big);
         FX.flash('#ffb703');
+        scorch(f.r, f.c, f.big ? 3 : 2);
         Sound.play('explode');
         shake(true);
         break;
+      case 'fuse': {
+        const el = pieceAt(f.r, f.c);
+        if (el) restartAnim(el, 'fusing');
+        Sound.play('fuse');
+        break;
+      }
       case 'blitz':
         FX.lightning(pos[0], pos[1]);
+        scorch(f.r, f.c, 1);
         Sound.play('zap');
         shake(true);
         break;
-      case 'snipe':
-        FX.ring(pos[0], pos[1], 'rgba(230,57,70,', 140);
-        FX.ring(pos[0], pos[1], 'rgba(255,255,255,', 60);
-        Sound.play('zap');
+      case 'snipe': {
+        const el = document.createElement('div');
+        el.className = 'crosshair';
+        el.innerHTML = Icons.svg('sniper');
+        el.style.left = pos[0] + 'px';
+        el.style.top = pos[1] + 'px';
+        el.style.width = el.style.height = sq * 1.3 + 'px';
+        document.body.appendChild(el);
+        Sound.play('lock');
+        setTimeout(() => {
+          FX.ring(pos[0], pos[1], 'rgba(230,57,70,', sq * 1.6, { width: 8 });
+          FX.burst(pos[0], pos[1], { n: 30, colors: ['#e63946', '#ffffff', '#ff8a8a'], speed: 9, size: 4, glow: true });
+          FX.flash('#ffffff');
+          Sound.play('shot');
+          shake(false);
+        }, 720);
+        setTimeout(() => el.remove(), 1000);
         break;
+      }
       case 'meteor':
         Sound.play('meteorFall');
-        FX.meteor(pos[0], pos[1], () => { Sound.play('explode'); shake(true); });
+        FX.meteor(pos[0], pos[1], () => { Sound.play('explode'); scorch(f.r, f.c, 1.5); shake(true); });
         break;
       case 'banner': queueBanner(f); break;
-      case 'ability':
-        toast(`${f.icon} ${state.players[f.who].name}: ${f.name}`);
-        Sound.play('coin');
+      case 'ability': {
+        const ab = E.ABILITIES.find((a) => a.id === f.id);
+        toast(`${state.players[f.who].name}: ${f.name}`, f.id, ab && ab.cat);
+        const chip = document.querySelectorAll('#players .pl')[f.who];
+        if (chip) restartAnim(chip, 'casting');
+        Sound.play('cast');
         break;
-      case 'pass':
-        toast(`💤 ${state.players[f.who].name} passt`);
-        Sound.play('coin');
+      }
+      case 'pass': {
+        toast(`${state.players[f.who].name} passt`, 'pass', 'eco');
+        const c = chipCenter(f.who);
+        if (c) floatIcon(c[0], c[1] - 10, 'Zzz', 'zzz');
+        Sound.play('snore');
+        break;
+      }
+      case 'steal':
+        coinsFly(f.from, f.to, f.amt);
+        Sound.play('swish');
         break;
       case 'mutate':
-        FX.burst(pos[0], pos[1], { n: 40, colors: ['#c77dff', '#7b2cbf', '#e0aaff', '#80ffdb'], speed: 5, size: 6, glow: true, grav: -0.05 });
+        FX.burst(pos[0], pos[1], { n: 40, colors: ['#c77dff', '#7b2cbf', '#e0aaff', '#80ffdb'], speed: 5, size: 6 * k, glow: true, grav: -0.05 });
+        FX.ring(pos[0], pos[1], 'rgba(199,125,255,', sq);
         Sound.play('mutate');
         break;
       case 'promote':
-        FX.burst(pos[0], pos[1], { n: 50, colors: ['#ffd60a', '#fff3b0', '#ffc300'], speed: 6, size: 6, glow: true, grav: -0.08 });
-        Sound.play('coin');
+        FX.burst(pos[0], pos[1], { n: 50, colors: GOLD, speed: 6, size: 6 * k, glow: true, grav: -0.08 });
+        floatIcon(pos[0], pos[1] - sq * 0.4, Icons.svg('crown'), 'crown');
+        Sound.play('fanfare');
         break;
       case 'burn':
-        FX.burst(pos[0], pos[1], { n: 50, colors: ['#ff4800', '#ff9e00', '#ffd000'], speed: 4, size: 8, glow: true, grav: -0.15 });
+        FX.burst(pos[0], pos[1], { n: 50, colors: ['#ff4800', '#ff9e00', '#ffd000'], speed: 4, size: 8 * k, glow: true, grav: -0.15 });
         Sound.play('burn');
         break;
       case 'slide':
-        FX.burst(pos[0], pos[1], { n: 25, colors: ['#caf0f8', '#90e0ef', '#ffffff'], speed: 4, size: 4, glow: true });
+        FX.burst(pos[0], pos[1], { n: 25, colors: ICE, speed: 4, size: 4, glow: true });
         Sound.play('ice');
         break;
       case 'freeze':
-        FX.burst(pos[0], pos[1], { n: 30, colors: ['#caf0f8', '#90e0ef', '#ffffff', '#48cae4'], speed: 4, size: 5, glow: true, grav: 0.02 });
+        FX.shards(pos[0], pos[1], ICE);
+        FX.ring(pos[0], pos[1], 'rgba(165,227,245,', sq * 1.2, { width: 8 });
         Sound.play('ice');
         break;
       case 'shield':
-        FX.ring(pos[0], pos[1], 'rgba(127,212,255,', 80);
+        FX.ring(pos[0], pos[1], 'rgba(127,212,255,', sq * 1.4, { width: 10, len: 40 });
+        FX.ring(pos[0], pos[1], 'rgba(255,255,255,', sq * 0.8, { from: sq * 2, len: 20 });
         FX.burst(pos[0], pos[1], { n: 20, colors: ['#7fd4ff', '#ffffff'], speed: 3, size: 4, glow: true, grav: 0 });
-        Sound.play('spawn');
+        Sound.play('shield');
         break;
       case 'poison':
-        FX.burst(pos[0], pos[1], { n: 30, colors: ['#7ee35b', '#3a9d23', '#c8ff9e'], speed: 3, size: 6, glow: true, grav: -0.1 });
-        Sound.play('mutate');
+        FX.burst(pos[0], pos[1], { n: 30, colors: TOX, speed: 3, size: 6 * k, glow: true, grav: -0.1 });
+        floatIcon(pos[0], pos[1] - sq * 0.3, Icons.svg('skull'), 'skull');
+        Sound.play('poison');
         break;
       case 'teleport': {
         const p2 = center(f.r2, f.c2);
-        FX.burst(pos[0], pos[1], { n: 30, colors: ['#b388ff', '#7df9ff', '#ffffff'], speed: 5, size: 5, glow: true, grav: 0 });
-        FX.burst(p2[0], p2[1], { n: 30, colors: ['#b388ff', '#7df9ff', '#ffffff'], speed: 5, size: 5, glow: true, grav: 0 });
-        FX.ring(p2[0], p2[1], 'rgba(179,136,255,', 70);
-        Sound.play('mutate');
+        FX.implode(pos[0], pos[1], VIOLET);
+        Sound.play('warp');
+        setTimeout(() => {
+          FX.burst(p2[0], p2[1], { n: 34, colors: VIOLET, speed: 5, size: 5, glow: true, grav: 0 });
+          FX.ring(p2[0], p2[1], 'rgba(179,136,255,', sq * 1.3, { width: 8 });
+        }, 330);
         break;
       }
+      case 'clone':
+        FX.burst(pos[0], pos[1], { n: 24, colors: ['#2fb36a', '#b7efc5', '#ffffff'], speed: 4, size: 5, glow: true, grav: 0 });
+        Sound.play('clone');
+        break;
+      case 'revive':
+        FX.beam(pos[0], pos[1], sq * 0.9, 'rgba(255,243,176,.55)');
+        Sound.play('revive');
+        break;
       case 'takeover':
         FX.burst(pos[0], pos[1], { n: 12, colors: PCOL[f.color], speed: 3, size: 5, glow: true, grav: -0.05 });
         break;
       case 'spawn':
-        FX.burst(pos[0], pos[1], { n: 25, colors: ['#06d6a0', '#b7efc5', '#ffffff'], speed: 4, size: 5, glow: true, grav: -0.05 });
-        Sound.play('spawn');
+        if (f.kind === 'drop') setTimeout(() => { FX.burst(pos[0], pos[1] + sq * 0.3, { n: 14, colors: ['rgba(60,40,20,.5)', '#ffffff'], speed: 3, size: 4, grav: 0 }); Sound.play('thud'); }, 380);
+        else { FX.burst(pos[0], pos[1], { n: 25, colors: ['#06d6a0', '#b7efc5', '#ffffff'], speed: 4, size: 5, glow: true, grav: -0.05 }); Sound.play('spawn'); }
         break;
-      case 'tornado':
+      case 'tornado': {
+        const [cx, cy, w] = boardCenter();
+        FX.vortex(cx, cy, w * 0.45, ['#cfd8dc', '#90a4ae', '#ffffff', '#b0bec5']);
         Sound.play('whoosh');
         restartAnim($('#board'), 'spin');
         break;
-      case 'shake': Sound.play('rumble'); shake(true); break;
+      }
+      case 'shake': {
+        const [cx, cy, w] = boardCenter();
+        for (let i = 0; i < 3; i++) FX.crack(cx + (Math.random() - 0.5) * w * 0.6, cy + (Math.random() - 0.5) * w * 0.6, w * 0.5);
+        Sound.play('rumble');
+        shake(true);
+        break;
+      }
       case 'coins': Sound.play('coin'); break;
       case 'check': Sound.play('check'); break;
       case 'win': setTimeout(() => { Sound.play('win'); FX.confetti(); }, 500); break;
@@ -705,22 +879,26 @@
     if (!f) { bBusy = false; return; }
     bBusy = true;
     const el = $('#banner');
-    el.innerHTML = `<div class="bicon">${f.icon || ''}</div><div class="btitle">${esc(f.title)}</div><div class="bsub">${esc(f.sub || '')}</div>`;
+    el.innerHTML = `<div class="bicon">${f.ico ? Icons.svg(f.ico) : esc(f.icon || '')}</div><div class="btitle">${esc(f.title)}</div><div class="bsub">${esc(f.sub || '')}</div>`;
     restartAnim(el, 'show');
     if (f.sound) Sound.play(f.sound);
     setTimeout(nextBanner, 1700);
   }
 
   let toastTimer = null;
-  function toast(msg) {
+  function toast(msg, ico, cat) {
     const el = $('#toast');
-    el.textContent = msg;
+    el.innerHTML = (ico ? `<span class="aicon cat-${cat || 'ctrl'}">${Icons.svg(ico)}</span>` : '') + `<span>${esc(msg)}</span>`;
     restartAnim(el, 'show');
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
   }
 
   document.addEventListener('pointerdown', () => Sound.init(), { once: true });
+
+  // Nur zum Testen: ?debug in der Adresse
+  if (new URLSearchParams(location.search).has('debug'))
+    window.GS = { get state() { return state; }, dispatch, render, me };
 
   // Direkt beitreten über ?room=CODE (Name vorher abfragen)
   const room = new URLSearchParams(location.search).get('room');
