@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GoofyASchach</title>
+  <meta name="description" content="Chaos-Schach mit Freunden: Fähigkeiten, Bomben, Blitze und verrückte Events.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>♞</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Bungee&family=Nunito:wght@400;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1 class="logo">Goofy<span>A</span>Schach</h1>
+      <span id="modeTag" class="tag hidden"></span>
+      <button id="btnMute" class="icon-btn" title="Ton an/aus">🔊</button>
+    </header>
+
+    <!-- LOBBY -->
+    <section id="lobby" class="screen">
+      <div class="card lobby-card">
+        <div class="hero">
+          <span class="float">♚</span><span class="float d1">💣</span><span class="float d2">♞</span><span class="float d3">⚡</span><span class="float d4">♛</span>
+        </div>
+        <p class="tagline">Schach. Aber mit Bomben, Blitzen, Lava und purem Chaos.</p>
+
+        <div id="lobbyMain">
+          <h2>Modus</h2>
+          <div class="modes">
+            <button class="mode-btn active" data-mode="chaos">
+              <span class="mi">🔥</span><b>Chaos</b><small>Punkte, Fähigkeiten-Shop &amp; zufällige Events. König schlagen = Sieg.</small>
+            </button>
+            <button class="mode-btn" data-mode="classic">
+              <span class="mi">♟️</span><b>Klassisch</b><small>Ganz normales Schach mit Schachmatt.</small>
+            </button>
+          </div>
+
+          <div class="actions">
+            <button id="btnCreate" class="btn big primary">🎮 Raum erstellen</button>
+            <div class="join">
+              <input id="joinCode" maxlength="5" placeholder="CODE" autocomplete="off" spellcheck="false">
+              <button id="btnJoin" class="btn">Beitreten</button>
+            </div>
+            <button id="btnLocal" class="btn ghost">👥 Lokal an einem Gerät spielen</button>
+          </div>
+        </div>
+
+        <div id="roomInfo" class="hidden">
+          <h2>Dein Raum-Code</h2>
+          <div id="roomCode" class="room-code">…</div>
+          <div class="link-row">
+            <input id="roomLink" readonly>
+            <button id="btnCopy" class="btn">Link kopieren</button>
+          </div>
+          <div class="spinner"></div>
+          <button id="btnCancelRoom" class="btn ghost">Abbrechen</button>
+        </div>
+
+        <p id="lobbyStatus" class="status-msg"></p>
+      </div>
+    </section>
+
+    <!-- SPIEL -->
+    <section id="game" class="screen hidden">
+      <div class="layout">
+        <div class="board-col">
+          <div id="pTop" class="player"><span class="pdot"></span><span class="pname"></span><span class="pbadges"></span><span class="ppoints"></span></div>
+          <div id="boardWrap">
+            <div id="board">
+              <div id="squares"></div>
+              <div id="pieces"></div>
+            </div>
+          </div>
+          <div id="pBottom" class="player"><span class="pdot"></span><span class="pname"></span><span class="pbadges"></span><span class="ppoints"></span></div>
+        </div>
+
+        <aside class="side">
+          <div class="card">
+            <div id="status" class="status"></div>
+            <div id="infoChips" class="chips"></div>
+          </div>
+
+          <div id="shop" class="card shop">
+            <div class="shop-head">
+              <h3>🛒 Fähigkeiten-Shop</h3>
+              <span id="shopPoints" class="points"></span>
+            </div>
+            <div id="abilities"></div>
+            <p id="shopHint" class="hint"></p>
+            <button id="btnCancelTarget" class="btn small ghost hidden">Abbrechen</button>
+          </div>
+
+          <div class="card">
+            <h3>📜 Was passiert</h3>
+            <ul id="log"></ul>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <div id="overlay" class="hidden">
+      <div class="card ov-card">
+        <h2 id="ovTitle"></h2>
+        <p id="ovSub"></p>
+        <div class="ov-actions">
+          <button id="btnRematch" class="btn big primary">🔁 Revanche</button>
+          <button id="btnLobby" class="btn ghost">Zur Lobby</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="banner"></div>
+    <div id="toast"></div>
+    <div id="flash"></div>
+  </div>
+  <canvas id="fx"></canvas>
+
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <script src="js/engine.js"></script>
+  <script src="js/sound.js"></script>
+  <script src="js/fx.js"></script>
+  <script src="js/net.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
