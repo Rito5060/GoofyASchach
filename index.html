@@ -32,6 +32,11 @@
         </div>
 
         <div id="lobbyMain" class="panel">
+          <div id="resumeBox" class="resume hidden">
+            <div><b>Laufendes Spiel</b><span id="resumeInfo"></span></div>
+            <button id="btnResume" class="btn primary">Fortsetzen</button>
+            <button id="btnDiscard" class="btn ghost small">Verwerfen</button>
+          </div>
           <label class="field">
             <span>Dein Name</span>
             <input id="playerName" maxlength="14" placeholder="z.B. Oskar" autocomplete="off">
@@ -110,6 +115,7 @@
           <div class="panel">
             <div id="status" class="status"></div>
             <div id="infoChips" class="chips"></div>
+            <div id="connState" class="conn hidden"></div>
             <button id="btnPass" class="btn wide hidden">Zug passen <span class="cost">+3</span></button>
           </div>
 
@@ -135,6 +141,7 @@
       <div class="panel ov-card">
         <h2 id="ovTitle"></h2>
         <p id="ovSub"></p>
+        <div id="ovStats"></div>
         <div class="ov-actions">
           <button id="btnRematch" class="btn primary wide">Revanche</button>
           <button id="btnLobby" class="btn ghost wide">Zur Lobby</button>

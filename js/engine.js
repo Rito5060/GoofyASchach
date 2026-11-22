@@ -62,6 +62,22 @@
     { id: 'quake', name: 'Erdbeben', icon: '🌋', desc: 'Alles wackelt!' },
     { id: 'frost', name: 'Frost', icon: '🥶', desc: 'Je 2 Figuren pro Spieler frieren ein!' },
   ];
+  // Regel-Events: gelten für eine gewisse Zahl an Zügen
+  const RULES = [
+    { id: 'backpawns', name: 'Rückwärts-Bauern', icon: '🔙', desc: 'Bauern laufen rückwärts!' },
+    { id: 'knights', name: 'Springer-Fieber', icon: '🐴', desc: 'Alle Figuren können zusätzlich wie Springer ziehen!' },
+    { id: 'ghost', name: 'Geister-Modus', icon: '👻', desc: 'Figuren gleiten durch andere hindurch!' },
+    { id: 'peace', name: 'Friedenszeit', icon: '🕊️', desc: 'Niemand kann Figuren schlagen!' },
+    { id: 'sprint', name: 'Königs-Sprint', icon: '🏃', desc: 'Könige ziehen bis zu 2 Felder weit!' },
+    { id: 'sale', name: 'Ausverkauf', icon: '🏷️', desc: 'Alle Fähigkeiten kosten die Hälfte!' },
+  ];
+  const rule = (s, id) => !!s.rules && s.rules.some((r) => r.id === id && r.until > s.ply);
+  const pdir = (s, p) => (rule(s, 'backpawns') ? [-p.dir[0], -p.dir[1]] : p.dir);
+  function abilityCost(s, id) {
+    const ab = ABILITIES.find((a) => a.id === id);
+    return ab ? (rule(s, 'sale') ? Math.ceil(ab.cost / 2) : ab.cost) : 0;
+  }
+  const newStats = () => ({ kills: 0, kings: 0, earned: 0, spent: 0, used: 0, fav: {}, lost: 0, moves: 0, passes: 0 });
 
   // ---------- Grundgerüst ----------
   function mk(s, type, owner, moved) {
@@ -98,10 +114,10 @@
       mode: opts.mode, n, teams,
       players: names.map((name, i) => ({
         name: name || COLOR_NAMES[colors[i]], seat: seats[i], color: colors[i], alive: true, offline: false,
-        team: teams ? (seats[i] === 'S' || seats[i] === 'N' ? 0 : 1) : i, points: 0, lost: [],
+        team: teams ? (seats[i] === 'S' || seats[i] === 'N' ? 0 : 1) : i, points: 0, lost: [], stats: newStats(),
       })),
       board: [], turn: 0, ep: null, ply: 0, lava: [], ice: [], doubleUntil: 0, rot: 0,
-      skip: null, bonus: false, abilityUsed: false, winners: null, result: null,
+      skip: null, bonus: false, abilityUsed: false, winners: null, result: null, rules: [],
       log: [], nextId: 1, lastMove: null, check: [], eventEvery: count * 2,
     };
     for (let r = 0; r < n; r++) s.board.push(Array(n).fill(null));
@@ -147,8 +163,8 @@
   const emptySquares = (s, filter) => validSquares(s, (r, c) => !s.board[r][c] && !isLava(s, r, c) && (!filter || filter(r, c)));
 
   // ---------- Angriffe & Züge ----------
-  function pawnDiags(p, r, c) {
-    const [dr, dc] = p.dir;
+  function pawnDiags(s, p, r, c) {
+    const [dr, dc] = pdir(s, p);
     return dr ? [[r + dr, c - 1], [r + dr, c + 1]] : [[r - 1, c + dc], [r + 1, c + dc]];
   }
 
@@ -157,20 +173,31 @@
     const out = [];
     if (!p) return out;
     const add = (rr, cc) => { if (valid(s, rr, cc)) out.push([rr, cc]); };
-    if (p.type === 'p') for (const [rr, cc] of pawnDiags(p, r, c)) add(rr, cc);
+    const ghost = rule(s, 'ghost');
+    if (p.type === 'p') for (const [rr, cc] of pawnDiags(s, p, r, c)) add(rr, cc);
     else if (p.type === 'n') for (const [a, b] of KN) add(r + a, c + b);
-    else if (p.type === 'k') for (const [a, b] of K8) add(r + a, c + b);
-    else {
+    else if (p.type === 'k') {
+      const reach = rule(s, 'sprint') ? 2 : 1;
+      for (const [a, b] of K8)
+        for (let k = 1; k <= reach; k++) {
+          const rr = r + a * k, cc = c + b * k;
+          if (!valid(s, rr, cc)) break;
+          out.push([rr, cc]);
+          if (s.board[rr][cc] && !ghost) break;
+        }
+    } else {
       const dirs = p.type === 'b' ? DIAG : p.type === 'r' ? ORTH : K8;
       for (const [a, b] of dirs) {
         let rr = r + a, cc = c + b;
         while (valid(s, rr, cc)) {
           out.push([rr, cc]);
-          if (s.board[rr][cc]) break;
+          if (s.board[rr][cc] && !ghost) break;
           rr += a; cc += b;
         }
       }
     }
+    if (rule(s, 'knights') && p.type !== 'n' && p.type !== 'k')
+      for (const [a, b] of KN) if (valid(s, r + a, c + b) && !out.some(([x, y]) => x === r + a && y === c + b)) out.push([r + a, c + b]);
     return out;
   }
 
@@ -192,6 +219,7 @@
     if (!valid(s, rr, cc)) return false;
     const t = s.board[rr][cc];
     if (!t) return true;
+    if (rule(s, 'peace')) return false;
     if (ally(s, t.owner, p.owner) || shielded(s, t)) return false;
     if (t.type === 'k' && s.bonus) return false; // Extra-Zug nach Skip: König tabu
     return true;
@@ -202,17 +230,20 @@
     if (!p || frozen(s, p)) return [];
     const out = [];
     if (p.type === 'p') {
-      const [dr, dc] = p.dir;
+      const [dr, dc] = pdir(s, p);
+      const back = rule(s, 'backpawns');
       const f1 = [r + dr, c + dc], f2 = [r + 2 * dr, c + 2 * dc];
       if (valid(s, f1[0], f1[1]) && !s.board[f1[0]][f1[1]]) {
         out.push({ r: f1[0], c: f1[1] });
-        if (!p.moved && valid(s, f2[0], f2[1]) && !s.board[f2[0]][f2[1]]) out.push({ r: f2[0], c: f2[1], dbl: true });
+        if (!p.moved && !back && valid(s, f2[0], f2[1]) && !s.board[f2[0]][f2[1]]) out.push({ r: f2[0], c: f2[1], dbl: true });
       }
-      for (const [rr, cc] of pawnDiags(p, r, c)) {
+      if (rule(s, 'knights'))
+        for (const [a, b] of KN) if (canLand(s, p, r + a, c + b)) out.push({ r: r + a, c: c + b });
+      for (const [rr, cc] of pawnDiags(s, p, r, c)) {
         if (!valid(s, rr, cc)) continue;
         const t = s.board[rr][cc];
         if (t) { if (canLand(s, p, rr, cc)) out.push({ r: rr, c: cc }); }
-        else if (s.ep && s.ep.r === rr && s.ep.c === cc && !ally(s, s.ep.owner, p.owner)) {
+        else if (s.ep && !rule(s, 'peace') && s.ep.r === rr && s.ep.c === cc && !ally(s, s.ep.owner, p.owner)) {
           const v = at(s, s.ep.vr, s.ep.vc);
           if (v && v.type === 'p' && !shielded(s, v)) out.push({ r: rr, c: cc, ep: true });
         }
@@ -260,13 +291,15 @@
   // ---------- Hilfen ----------
   function gain(s, who, n) {
     if (s.mode !== 'chaos' || n <= 0) return;
-    s.players[who].points += n * (s.ply < s.doubleUntil ? 2 : 1);
+    const amt = n * (s.ply < s.doubleUntil ? 2 : 1);
+    s.players[who].points += amt;
+    s.players[who].stats.earned += amt;
   }
   function delayFrom(fx, i, d) {
     for (; i < fx.length; i++) fx[i].delay = (fx[i].delay || 0) + d;
   }
   function lose(s, p) {
-    if (p && p.type !== 'k' && s.players[p.owner]) s.players[p.owner].lost.push(p.type);
+    if (p && p.type !== 'k' && s.players[p.owner]) { s.players[p.owner].lost.push(p.type); s.players[p.owner].stats.lost++; }
   }
   function destroy(s, r, c, fx, kind, by) {
     const p = at(s, r, c);
@@ -274,7 +307,7 @@
     lose(s, p);
     s.board[r][c] = null;
     fx.push({ type: 'capture', r, c, color: s.players[p.owner].color, kind });
-    if (by !== undefined && !ally(s, p.owner, by)) gain(s, by, Math.ceil(VAL[p.type] / 2));
+    if (by !== undefined && !ally(s, p.owner, by)) { gain(s, by, Math.ceil(VAL[p.type] / 2)); s.players[by].stats.kills++; }
     return true;
   }
   function atEdge(s, p, r, c) {
@@ -293,7 +326,7 @@
   // Nach Chaos aufräumen: Bauern am Rand befördern, Lava verbrennt
   function normalize(s, fx) {
     for (const { p, r, c } of allPieces(s)) {
-      if (p.type === 'p' && atEdge(s, p, r, c)) {
+      if (p.type === 'p' && !rule(s, 'backpawns') && atEdge(s, p, r, c)) {
         p.type = s.mode === 'chaos' ? pick(['q', 'q', 'r', 'b', 'n']) : 'q';
         fx.push({ type: 'promote', r, c });
         log(s, `✨ Bauer von ${pname(s, p.owner)} wird zur Figur: ${NAMES[p.type]}!`);
@@ -333,6 +366,7 @@
     }
     const loot = Math.floor(v.points / 2);
     s.players[killer].points += loot;
+    s.players[killer].stats.earned += loot;
     v.points = 0;
     if (s.skip === victim) s.skip = null;
     log(s, `💀 ${v.name} ist raus! ${pname(s, killer)} übernimmt ${n} Figuren${loot ? ` und ${loot} Punkte` : ''}.`);
@@ -372,8 +406,11 @@
     }
     s.ep = m.dbl ? { r: (fr + tr) / 2, c: (fc + tc) / 2, vr: tr, vc: tc, owner: who } : null;
 
+    s.players[who].stats.moves++;
     if (captured) {
       lose(s, captured);
+      s.players[who].stats.kills++;
+      if (captured.type === 'k') s.players[who].stats.kings++;
       const mult = s.ply < s.doubleUntil ? 2 : 1;
       fx.push({ type: 'capture', r: tr, c: tc, color: s.players[captured.owner].color, kind: 'hit' });
       gain(s, who, VAL[captured.type]);
@@ -409,6 +446,12 @@
     s.bonus = false;
     s.lava = s.lava.filter((x) => x.until > s.ply);
     s.ice = s.ice.filter((x) => x.until > s.ply);
+    for (const r of s.rules.filter((x) => x.until <= s.ply)) {
+      const def = RULES.find((d) => d.id === r.id);
+      log(s, `⌛ ${def.name} ist vorbei.`);
+      fx.push({ type: 'ruleEnd', id: r.id });
+    }
+    s.rules = s.rules.filter((x) => x.until > s.ply);
     for (const { p, r, c } of allPieces(s, (p) => p.poison && p.poison <= s.ply)) {
       p.poison = 0;
       p.shield = 0;
@@ -464,6 +507,7 @@
     if (s.mode !== 'chaos' || s.winners || s.turn !== who) return null;
     const fx = [{ type: 'pass', who }];
     gain(s, who, PASS_POINTS);
+    s.players[who].stats.passes++;
     log(s, `💤 ${pname(s, who)} passt und kassiert +${PASS_POINTS * (s.ply < s.doubleUntil ? 2 : 1)} Punkte.`);
     s.lastMove = null;
     s.ep = null;
@@ -476,6 +520,7 @@
     if (!s.players[who]) return null;
     s.players[who].offline = off;
     const fx = [];
+    if (!off) log(s, `🔌 ${pname(s, who)} ist wieder da!`);
     if (off && s.turn === who && !s.winners) {
       log(s, `📴 ${pname(s, who)} hat das Spiel verlassen.`);
       s.ply--; // endTurn zählt wieder hoch, ohne Event doppelt auszulösen
@@ -518,7 +563,8 @@
     const ab = ABILITIES.find((a) => a.id === id);
     if (!ab || s.mode !== 'chaos' || s.winners || s.turn !== who || s.abilityUsed) return null;
     const me = s.players[who];
-    if (me.points < ab.cost || abilityBlocked(s, who, id)) return null;
+    const cost = abilityCost(s, id);
+    if (me.points < cost || abilityBlocked(s, who, id)) return null;
     if (ab.target && (!target || !validTarget(s, who, id, target.r, target.c, 1))) return null;
     if (ab.then && (target.r2 === undefined || !validTarget(s, who, id, target.r2, target.c2, 2))) return null;
     const enemies = s.players.map((p, i) => i).filter((i) => s.players[i].alive && !ally(s, i, who));
@@ -672,6 +718,7 @@
         const amt = Math.min(6, Math.floor(s.players[rich].points / 4));
         s.players[rich].points -= amt;
         me.points += amt;
+        me.stats.earned += amt;
         fx.push({ type: 'steal', from: rich, to: who, amt });
         log(s, `🦝 ${me.name} klaut ${amt} Punkte von ${pname(s, rich)}!`);
         break;
@@ -704,7 +751,10 @@
         break;
       }
     }
-    me.points -= ab.cost;
+    me.points -= cost;
+    me.stats.spent += cost;
+    me.stats.used++;
+    me.stats.fav[id] = (me.stats.fav[id] || 0) + 1;
     s.abilityUsed = true;
     fx.unshift({ type: 'ability', id, cat: ab.cat, name: ab.name, who });
     normalize(s, fx);
@@ -728,6 +778,16 @@
 
   // ---------- Chaos-Events ----------
   function randomEvent(s, fx) {
+    const freeRules = RULES.filter((r) => !rule(s, r.id));
+    if (freeRules.length && Math.random() < 0.45) {
+      const rl = pick(freeRules);
+      const dur = Math.max(4, s.eventEvery);
+      s.rules.push({ id: rl.id, until: s.ply + dur });
+      fx.push({ type: 'banner', ico: 'rule-' + rl.id, title: rl.name, sub: `${rl.desc} (${dur} Züge)`, sound: 'event', rule: true });
+      log(s, `${rl.icon} REGEL: ${rl.name} – ${dur} Züge lang!`);
+      s.ep = null;
+      return;
+    }
     const ev = pick(EVENTS);
     const big = s.n === 14;
     fx.push({ type: 'banner', ico: ev.id, title: ev.name, sub: ev.desc, sound: 'event' });
@@ -787,7 +847,7 @@
         break;
       }
       case 'gift':
-        for (const i of alive) s.players[i].points += 5;
+        for (const i of alive) { s.players[i].points += 5; s.players[i].stats.earned += 5; }
         fx.push({ type: 'coins' });
         break;
       case 'mutation':
@@ -810,7 +870,7 @@
   }
 
   window.Engine = {
-    newGame, legalMoves, doMove, doPass, PASS_POINTS, useAbility, validTarget, abilityBlocked, setOffline, valid,
+    newGame, legalMoves, RULES, rule, abilityCost, doMove, doPass, PASS_POINTS, useAbility, validTarget, abilityBlocked, setOffline, valid,
     ABILITIES, EVENTS, NAMES, VAL, COLOR_NAMES, isLava, isIce, shielded, frozen,
   };
 })();

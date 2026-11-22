@@ -40,6 +40,13 @@
     knight: `<text x="12" y="19.5" text-anchor="middle" font-size="20" fill="currentColor">&#9822;&#xFE0E;</text>`,
     rematch: `<path ${S} d="M20 12a8 8 0 1 1-2.4-5.7"/><path ${S} d="M20.5 3.5v5h-5"/>`,
   };
+  P['rule-backpawns'] = `<circle ${F} cx="12" cy="6.5" r="3.2"/><path ${F} d="M8.2 18.5c0-4 1.4-6.5 3.8-8.3 2.4 1.8 3.8 4.3 3.8 8.3z"/><path ${S} d="M12 19.5v3M9.5 20.5 12 22.5l2.5-2"/>`;
+  P['rule-knights'] = `<text x="12" y="19.5" text-anchor="middle" font-size="20" fill="currentColor">&#9822;&#xFE0E;</text><path ${S} d="M19 3v5M16.5 5.5h5"/>`;
+  P['rule-ghost'] = `<path ${F} d="M12 2.5a7.5 7.5 0 0 0-7.5 7.5v11.5l2.5-2 2.5 2 2.5-2 2.5 2 2.5-2 2.5 2V10A7.5 7.5 0 0 0 12 2.5z"/><circle fill="#000" opacity=".5" cx="9" cy="10" r="1.7"/><circle fill="#000" opacity=".5" cx="15" cy="10" r="1.7"/>`;
+  P['rule-peace'] = `<circle ${S} cx="12" cy="12" r="9.5"/><path ${S} d="M12 2.5v19M12 12l-6.7 6.7M12 12l6.7 6.7"/>`;
+  P['rule-sprint'] = `<path ${F} d="M7 18.5 6 9l4 3.5L13 6l3 6.5 4-3.5-1 9.5z"/><path ${S} d="M2 8h2.5M1.5 12h3M2 16h2.5"/>`;
+  P['rule-sale'] = `<path ${F} d="M3 3h8.5l9.5 9.5-8.5 8.5L3 11.5z"/><circle fill="#000" opacity=".4" cx="7.5" cy="7.5" r="1.8"/><path stroke="#000" stroke-opacity=".4" stroke-width="2" stroke-linecap="round" d="M10 15l5-5"/>`;
+  for (const k of ['backpawns', 'knights', 'ghost', 'peace', 'sprint', 'sale']) P[k] = P['rule-' + k];
   P.mutation = P.mutate;
   P.quakeEv = P.quake;
 

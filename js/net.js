@@ -16,9 +16,17 @@
       return s;
     },
 
-    host(onReady) {
+    reset() {
+      try { if (this.conn) this.conn.close(); } catch (e) {}
+      try { if (this.peer) this.peer.destroy(); } catch (e) {}
+      this.conn = null;
+      this.peer = null;
+    },
+
+    // fixedCode: Raum nach Neuladen mit gleichem Code wieder öffnen
+    host(onReady, fixedCode, tries) {
       this.role = 'host';
-      const code = this.makeCode();
+      const code = fixedCode || this.makeCode();
       const peer = new Peer(PREFIX + code);
       this.peer = peer;
       peer.on('open', () => onReady(code));
@@ -29,7 +37,12 @@
         c.on('error', () => {});
       });
       peer.on('error', (e) => {
-        if (e.type === 'unavailable-id') { peer.destroy(); this.host(onReady); return; }
+        if (e.type === 'unavailable-id') {
+          peer.destroy();
+          if (!fixedCode) { this.host(onReady); return; }
+          // Alte Verbindung des Codes wird vom Server erst kurz danach freigegeben
+          if ((tries || 0) < 20) { setTimeout(() => this.host(onReady, fixedCode, (tries || 0) + 1), 2000); return; }
+        }
         if (e.type === 'peer-unavailable') return;
         this.onError && this.onError(e);
       });
@@ -38,6 +51,7 @@
 
     join(code) {
       this.role = 'guest';
+      this.reset();
       const peer = new Peer();
       this.peer = peer;
       peer.on('open', () => {
@@ -45,10 +59,10 @@
         this.conn = c;
         c.on('open', () => this.onOpen && this.onOpen());
         c.on('data', (d) => this.onMessage && this.onMessage(d));
-        c.on('close', () => this.onClose && this.onClose());
-        c.on('error', (e) => this.onError && this.onError(e));
+        c.on('close', () => { if (this.conn === c) this.onClose && this.onClose(); });
+        c.on('error', (e) => { if (this.conn === c) this.onError && this.onError(e); });
       });
-      peer.on('error', (e) => this.onError && this.onError(e));
+      peer.on('error', (e) => { if (this.peer === peer) this.onError && this.onError(e); });
     },
 
     send(d) {

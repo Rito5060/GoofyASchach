@@ -20,6 +20,15 @@
   const lobby = []; // Host: [{ name, conn }]
   const pieceEls = new Map();
   let squares = [];
+  let reconnecting = false, retries = 0, retryTimer = null;
+  const CID = (() => {
+    const mk = () => Math.random().toString(36).slice(2, 10);
+    try {
+      let c = sessionStorage.getItem('gs-cid');
+      if (!c) { c = mk(); sessionStorage.setItem('gs-cid', c); }
+      return c;
+    } catch (e) { return mk(); }
+  })();
   let builtN = 0;
 
   // ---------- Lobby-Bedienelemente ----------
@@ -143,18 +152,80 @@
   }
   function broadcastState(fx) {
     lobby.forEach((p, i) => p.conn && Net.sendTo(p.conn, { t: 'state', s: state, fx, you: i }));
+    saveHost();
+  }
+  // Host speichert das Spiel, um es nach Neuladen fortsetzen zu können
+  function saveHost() {
+    if (role !== 'host' || !state) return;
+    try {
+      if (state.winners) { localStorage.removeItem('gs-host'); return; }
+      localStorage.setItem('gs-host', JSON.stringify({ code: roomCode, state, lobby: lobby.map((p) => ({ name: p.name, cid: p.cid || '' })), opts, t: Date.now() }));
+    } catch (e) {}
+  }
+  function loadHostSave() {
+    try {
+      const sv = JSON.parse(localStorage.getItem('gs-host') || 'null');
+      if (sv && sv.state && !sv.state.winners && Date.now() - sv.t < 3 * 3600 * 1000) return sv;
+    } catch (e) {}
+    return null;
+  }
+  function resumeHost(sv) {
+    role = 'host';
+    myIdx = 0;
+    roomCode = sv.code;
+    Object.assign(opts, sv.opts || {});
+    lobby.length = 0;
+    sv.lobby.forEach((p) => lobby.push({ name: p.name, cid: p.cid, conn: null }));
+    lobbyStatus('Öffne Raum ' + sv.code + ' wieder… (kann bis zu 40 Sek. dauern)');
+    Net.host(() => {
+      state = sv.state;
+      startGame();
+      const fx = [{ type: 'banner', ico: 'plug', title: 'Spiel fortgesetzt', sub: 'Deine Freunde verbinden sich automatisch neu' }];
+      render(fx);
+      saveHost();
+      // Wer nach 45 Sekunden nicht zurück ist, wird übersprungen
+      setTimeout(() => {
+        const out = [];
+        lobby.forEach((p, i) => { if (i > 0 && !p.conn && !state.players[i].offline) out.push(...(E.setOffline(state, i, true) || [])); });
+        if (out.length || lobby.some((p, i) => i > 0 && !p.conn)) { broadcastState(out); render(out); }
+      }, 45000);
+    }, sv.code);
+  }
+  const save = !new URLSearchParams(location.search).get('room') && loadHostSave();
+  if (save) {
+    const box = $('#resumeBox');
+    box.classList.remove('hidden');
+    $('#resumeInfo').textContent = `Raum ${save.code} · ${save.state.players.map((p) => p.name).join(', ')}`;
+    $('#btnResume').addEventListener('click', () => { Sound.play('click'); box.classList.add('hidden'); resumeHost(save); });
+    $('#btnDiscard').addEventListener('click', () => { try { localStorage.removeItem('gs-host'); } catch (e) {} box.classList.add('hidden'); });
   }
 
   Net.onGuestOpen = () => {};
   Net.onGuestData = (c, d) => {
     if (!d || typeof d !== 'object') return;
     if (d.t === 'join') {
-      if (state || lobby.length >= 4) {
-        Net.sendTo(c, { t: 'full', started: !!state });
-        setTimeout(() => c.close(), 400);
-        return;
+      const cid = String(d.cid || '');
+      const name = String(d.name || 'Spieler').slice(0, 14);
+      const reject = () => { Net.sendTo(c, { t: 'full', started: !!state }); setTimeout(() => c.close(), 400); };
+      if (state) {
+        // Wiederverbinden: gleicher Browser-Tab oder gleicher Name auf freiem Platz
+        let idx = lobby.findIndex((p, i) => i > 0 && cid && p.cid === cid);
+        if (idx < 0) idx = lobby.findIndex((p, i) => i > 0 && (!p.conn || !p.conn.open) && p.name === name);
+        if (idx > 0 && (!lobby[idx].conn || !lobby[idx].conn.open || lobby[idx].cid === cid)) {
+          lobby[idx].conn = c;
+          lobby[idx].cid = cid;
+          const fx = E.setOffline(state, idx, false) || [];
+          fx.push({ type: 'banner', ico: 'plug', title: `${state.players[idx].name} ist zurück!`, sub: 'Weiter geht\'s' });
+          broadcastState(fx);
+          render(fx);
+          return;
+        }
+        return reject();
       }
-      lobby.push({ name: String(d.name || 'Spieler').slice(0, 14), conn: c });
+      const ex = lobby.findIndex((p, i) => i > 0 && cid && p.cid === cid);
+      if (ex > 0) { lobby[ex].conn = c; lobby[ex].name = name; }
+      else if (lobby.length >= 4) return reject();
+      else lobby.push({ name, conn: c, cid });
       Sound.play('spawn');
       broadcastLobby();
     } else if (d.t === 'action' && state) {
@@ -170,10 +241,16 @@
       broadcastLobby();
     } else {
       lobby[idx].conn = null;
-      const fx = E.setOffline(state, idx, true) || [];
-      fx.push({ type: 'banner', ico: 'plug', title: `${state.players[idx].name} ist weg`, sub: 'Seine Züge werden übersprungen' });
-      broadcastState(fx);
-      render(fx);
+      const name = state.players[idx].name;
+      toast(`${name} hat die Verbindung verloren – warte 20 Sek.`, 'plug', 'atk');
+      // Kurze Gnadenfrist zum Wiederverbinden, erst dann wird übersprungen
+      setTimeout(() => {
+        if (!state || lobby[idx].conn || state.players[idx].offline) return;
+        const fx = E.setOffline(state, idx, true) || [];
+        fx.push({ type: 'banner', ico: 'plug', title: `${name} ist weg`, sub: 'Seine Züge werden übersprungen, bis er zurück ist' });
+        broadcastState(fx);
+        render(fx);
+      }, 20000);
     }
   };
 
@@ -188,7 +265,7 @@
   });
 
   // ---------- Gast ----------
-  Net.onOpen = () => Net.send({ t: 'join', name: myName() });
+  Net.onOpen = () => Net.send({ t: 'join', name: myName(), cid: CID });
   Net.onMessage = (d) => {
     if (!d || typeof d !== 'object') return;
     if (d.t === 'lobby') {
@@ -197,6 +274,11 @@
       showRoom();
       renderRoom(d.names, d.you, d.mode, d.teams);
     } else if (d.t === 'state') {
+      if (reconnecting) {
+        reconnecting = false;
+        clearTimeout(retryTimer);
+        toast('Wieder verbunden', 'plug', 'sup');
+      }
       state = d.s;
       myIdx = d.you;
       if ($('#game').classList.contains('hidden')) startGame();
@@ -212,10 +294,35 @@
     }
   };
   Net.onClose = () => {
-    if (state) queueBanner({ ico: 'plug', title: 'Verbindung weg', sub: 'Der Host hat das Spiel verlassen' });
-    else { lobbyStatus('Verbindung zum Raum verloren.', true); $('#btnJoin').disabled = false; }
+    if (state && !state.winners) startReconnect();
+    else if (!state) { lobbyStatus('Verbindung zum Raum verloren.', true); $('#btnJoin').disabled = false; }
   };
+  function startReconnect() {
+    if (reconnecting) return;
+    reconnecting = true;
+    retries = 0;
+    queueBanner({ ico: 'plug', title: 'Verbindung weg', sub: 'Verbinde automatisch neu…' });
+    tryReconnect();
+  }
+  function tryReconnect() {
+    if (!reconnecting) return;
+    if (++retries > 45) {
+      reconnecting = false;
+      queueBanner({ ico: 'plug', title: 'Keine Verbindung', sub: 'Öffne den Raum-Link neu, um wieder einzusteigen' });
+      return;
+    }
+    renderConn();
+    Net.join(roomCode);
+    retryTimer = setTimeout(tryReconnect, 4000);
+  }
+  function renderConn() {
+    const el = $('#connState');
+    if (!el) return;
+    el.classList.toggle('hidden', !reconnecting);
+    el.textContent = `Verbinde neu… (Versuch ${retries})`;
+  }
   Net.onError = (e) => {
+    if (reconnecting) return; // nächster Versuch läuft automatisch
     const map = {
       'peer-unavailable': 'Raum nicht gefunden. Stimmt der Code?',
       network: 'Netzwerkfehler – Internetverbindung prüfen.',
@@ -512,7 +619,13 @@
       if (state.bonus) info.push('<span class="chip gold">Extra-Zug · Könige tabu</span>');
       if (state.lava.length) info.push('<span class="chip orange">Lava</span>');
       if (state.ice.length) info.push('<span class="chip blue">Eis</span>');
+      for (const r of state.rules || []) {
+        const def = E.RULES.find((x) => x.id === r.id);
+        const left = r.until - state.ply;
+        if (def && left > 0) info.push(`<span class="chip rule" title="${esc(def.desc)}">${Icons.svg('rule-' + r.id)}${def.name} · noch ${left}</span>`);
+      }
     }
+    renderConn();
     $('#infoChips').innerHTML = info.join('');
 
     const pass = $('#btnPass');
@@ -542,7 +655,10 @@
       }
       for (const b of list.children) {
         const ab = E.ABILITIES.find((a) => a.id === b.dataset.id);
-        b.disabled = !canAct() || state.abilityUsed || pts < ab.cost || !!E.abilityBlocked(state, mine, ab.id);
+        const cost = E.abilityCost(state, ab.id);
+        b.querySelector('.acost').textContent = cost;
+        b.classList.toggle('sale', cost < ab.cost);
+        b.disabled = !canAct() || state.abilityUsed || pts < cost || !!E.abilityBlocked(state, mine, ab.id);
         b.classList.toggle('armed', !!targeting && targeting.id === ab.id);
       }
       renderHint();
@@ -561,12 +677,44 @@
       else title = state.winners.includes(myIdx) ? 'Du hast gewonnen!' : 'Verloren!';
       $('#ovTitle').textContent = title;
       $('#ovSub').textContent = state.result || '';
+      $('#ovStats').innerHTML = statsHtml();
       ov.classList.remove('hidden');
     } else ov.classList.add('hidden');
   }
 
+  function statsHtml() {
+    const pl = state.players;
+    const chaos = state.mode === 'chaos';
+    const st = pl.map((p) => p.stats || {});
+    const best = (key, min) => {
+      const v = Math.max(...st.map((x) => x[key] || 0));
+      return v >= (min || 1) ? st.map((x, i) => ((x[key] || 0) === v ? i : -1)).filter((i) => i >= 0) : [];
+    };
+    const awards = [];
+    const aw = (ids, title, what) => { if (ids.length === 1) awards.push(`<li><b>${title}</b><span>${esc(pl[ids[0]].name)} · ${what(ids[0])}</span></li>`); };
+    aw(best('kills'), 'Schlächter', (i) => `${st[i].kills} Figuren erledigt`);
+    aw(best('kings'), 'Königsmörder', (i) => `${st[i].kings} König${st[i].kings > 1 ? 'e' : ''}`);
+    if (chaos) {
+      aw(best('spent'), 'Shopping-König', (i) => `${st[i].spent} 🪙 ausgegeben`);
+      aw(best('passes', 2), 'Faultier', (i) => `${st[i].passes}× gepasst`);
+      aw(best('used', 3), 'Zauberer', (i) => `${st[i].used} Fähigkeiten`);
+    }
+    aw(best('lost', 4), 'Pechvogel', (i) => `${st[i].lost} Figuren verloren`);
+    const favAll = {};
+    st.forEach((x) => Object.entries(x.fav || {}).forEach(([k, v]) => (favAll[k] = (favAll[k] || 0) + v)));
+    const fav = Object.entries(favAll).sort((a, b) => b[1] - a[1])[0];
+    let favHtml = '';
+    if (fav) {
+      const ab = E.ABILITIES.find((a) => a.id === fav[0]);
+      favHtml = `<div class="fav"><span class="aicon cat-${ab.cat}">${Icons.svg(ab.id)}</span><span>Beliebteste Fähigkeit: <b>${ab.name}</b> (${fav[1]}×)</span></div>`;
+    }
+    const head = `<tr><th></th><th>Kills</th><th>Könige</th>${chaos ? '<th>Verdient</th><th>Ausgegeben</th>' : ''}<th>Verloren</th></tr>`;
+    const rows = pl.map((p, i) => `<tr class="c-${p.color}"><td><span class="dot"></span>${esc(p.name)}</td><td>${st[i].kills || 0}</td><td>${st[i].kings || 0}</td>${chaos ? `<td>${st[i].earned || 0}</td><td>${st[i].spent || 0}</td>` : ''}<td>${st[i].lost || 0}</td></tr>`).join('');
+    return `${awards.length ? `<ul class="awards">${awards.join('')}</ul>` : ''}<table class="stats">${head}${rows}</table>${favHtml}`;
+  }
+
   function showDesc(ab) {
-    $('#shopHint').innerHTML = `<b>${ab.name} · ${ab.cost} 🪙</b><br>${esc(ab.desc)}`;
+    $('#shopHint').innerHTML = `<b>${ab.name} · ${state ? E.abilityCost(state, ab.id) : ab.cost} 🪙</b><br>${esc(ab.desc)}`;
   }
   function renderHint() {
     if (!state) return;
@@ -862,6 +1010,11 @@
         break;
       }
       case 'coins': Sound.play('coin'); break;
+      case 'ruleEnd': {
+        const def = E.RULES.find((x) => x.id === f.id);
+        if (def) toast(`${def.name} ist vorbei`, 'rule-' + f.id, 'ctrl');
+        break;
+      }
       case 'check': Sound.play('check'); break;
       case 'win': setTimeout(() => { Sound.play('win'); FX.confetti(); }, 500); break;
     }
@@ -879,6 +1032,7 @@
     if (!f) { bBusy = false; return; }
     bBusy = true;
     const el = $('#banner');
+    el.classList.toggle('rule', !!f.rule);
     el.innerHTML = `<div class="bicon">${f.ico ? Icons.svg(f.ico) : esc(f.icon || '')}</div><div class="btitle">${esc(f.title)}</div><div class="bsub">${esc(f.sub || '')}</div>`;
     restartAnim(el, 'show');
     if (f.sound) Sound.play(f.sound);
