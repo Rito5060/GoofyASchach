@@ -36,7 +36,7 @@
     { id: 'freeze', name: 'Freeze', icon: '❄️', cost: 4, target: 'enemy', desc: 'Friert eine gegnerische Figur für eine Runde ein.' },
     { id: 'clone', name: 'Klon', icon: '👯', cost: 7, target: 'own', desc: 'Kopiert eine eigene Figur auf ein Nachbarfeld.' },
     { id: 'mutate', name: 'Mutation', icon: '🧬', cost: 4, target: 'piece', desc: 'Verwandelt eine Figur (kein König) in eine zufällige andere.' },
-    { id: 'steal', name: 'Taschendieb', icon: '🦝', cost: 3, desc: 'Klaut bis zu 6 Punkte vom reichsten Gegner.' },
+    { id: 'steal', name: 'Taschendieb', icon: '🦝', cost: 4, desc: 'Klaut ein Viertel der Punkte des reichsten Gegners (max. 6).' },
     { id: 'quake', name: 'Erdbeben', icon: '🌋', cost: 7, desc: 'Alle Figuren wackeln in zufällige Richtungen.' },
     { id: 'tornado', name: 'Tornado', icon: '🌪️', cost: 8, desc: 'Wirbelt bis zu 10 Figuren durcheinander.' },
     { id: 'army', name: 'Bauern-Armee', icon: '🪖', cost: 6, desc: '3 neue eigene Bauern spawnen bei deiner Armee.' },
@@ -506,6 +506,7 @@
   function abilityBlocked(s, who, id) {
     if (id === 'skip' && (s.bonus || aliveCount(s) < 2)) return 'Im Extra-Zug nicht erlaubt';
     if (id === 'revive' && !s.players[who].lost.length) return 'Keine verlorenen Figuren';
+    if (id === 'steal' && !s.players.some((p, i) => p.alive && !ally(s, i, who) && p.points >= 4)) return 'Kein Gegner hat genug Punkte';
     return null;
   }
 
@@ -655,7 +656,7 @@
       case 'steal': {
         const rich = enemies.slice().sort((a, b) => s.players[b].points - s.players[a].points)[0];
         if (rich === undefined) return null;
-        const amt = Math.min(6, s.players[rich].points);
+        const amt = Math.min(6, Math.floor(s.players[rich].points / 4));
         s.players[rich].points -= amt;
         me.points += amt;
         fx.push({ type: 'coins' });
