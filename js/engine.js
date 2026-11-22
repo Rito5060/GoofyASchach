@@ -1,16 +1,19 @@
-// GoofyASchach – Spiellogik (Regeln, Fähigkeiten, Chaos-Events)
-// Läuft beim Host (bzw. lokal). Der Gast bekommt nur den fertigen Zustand.
+// GoofyASchach – Spiellogik für 2–4 Spieler (Regeln, Fähigkeiten, Chaos-Events)
+// Läuft beim Host (bzw. lokal). Gäste bekommen nur den fertigen Zustand.
 (function () {
   const VAL = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
   const NAMES = { p: 'Bauer', n: 'Springer', b: 'Läufer', r: 'Turm', q: 'Dame', k: 'König' };
-  const CN = { w: 'Weiß', b: 'Schwarz' };
   const KN = [[1, 2], [2, 1], [-1, 2], [-2, 1], [1, -2], [2, -1], [-1, -2], [-2, -1]];
   const K8 = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
   const DIAG = [[1, 1], [1, -1], [-1, 1], [-1, -1]];
   const ORTH = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 
-  const opp = (c) => (c === 'w' ? 'b' : 'w');
-  const inB = (r, c) => r >= 0 && r < 8 && c >= 0 && c < 8;
+  // Sitzplätze: Richtung, in die die Bauern laufen
+  const SEAT_DIR = { S: [-1, 0], N: [1, 0], W: [0, 1], E: [0, -1] };
+  const SEATS_BY_COUNT = { 2: ['S', 'N'], 3: ['S', 'W', 'N'], 4: ['S', 'W', 'N', 'E'] };
+  const COLORS_BY_COUNT = { 2: ['white', 'black'], 3: ['red', 'blue', 'yellow'], 4: ['red', 'blue', 'yellow', 'green'] };
+  const COLOR_NAMES = { white: 'Weiß', black: 'Schwarz', red: 'Rot', blue: 'Blau', yellow: 'Gelb', green: 'Grün' };
+
   const rnd = (n) => Math.floor(Math.random() * n);
   const pick = (a) => a[rnd(a.length)];
   const sign = (x) => (x > 0 ? 1 : x < 0 ? -1 : 0);
@@ -22,95 +25,146 @@
     return a;
   }
 
+  // target: square | piece (beliebig, kein König) | own (eigene, kein König) | ownAny (eigene inkl. König) | enemy (gegnerisch, kein König)
   const ABILITIES = [
-    { id: 'skip', name: 'Zug-Skip', icon: '⏭️', cost: 6, desc: 'Gegner setzt aus – du ziehst zweimal hintereinander.' },
-    { id: 'blitz', name: 'Blitz', icon: '⚡', cost: 5, desc: 'Ein Blitz trifft eine zufällige gegnerische Figur (kein König).' },
-    { id: 'bomb', name: 'Bombe', icon: '💣', cost: 10, target: 'square', desc: 'Sprengt ein 3×3-Feld weg. Könige überleben – deine Figuren nicht!' },
+    { id: 'skip', name: 'Zug-Skip', icon: '⏭️', cost: 6, desc: 'Der nächste Spieler setzt aus. Im Extra-Zug kann kein König geschlagen werden.' },
+    { id: 'blitz', name: 'Blitz', icon: '⚡', cost: 5, desc: 'Trifft eine zufällige gegnerische Figur (kein König).' },
+    { id: 'bomb', name: 'Bombe', icon: '💣', cost: 10, target: 'square', desc: 'Sprengt 3×3 Felder weg – auch deine eigenen Figuren!' },
+    { id: 'kamikaze', name: 'Kamikaze', icon: '🧨', cost: 4, target: 'own', desc: 'Eine eigene Figur explodiert und reißt alles um sich mit.' },
+    { id: 'teleport', name: 'Teleport', icon: '🌀', cost: 5, target: 'own', then: 'empty', desc: 'Beame eine eigene Figur auf ein beliebiges freies Feld.' },
+    { id: 'shield', name: 'Schild', icon: '🛡️', cost: 6, target: 'ownAny', desc: 'Eine eigene Figur (auch König) ist eine Runde unverwundbar.' },
+    { id: 'freeze', name: 'Freeze', icon: '❄️', cost: 4, target: 'enemy', desc: 'Friert eine gegnerische Figur für eine Runde ein.' },
+    { id: 'clone', name: 'Klon', icon: '👯', cost: 7, target: 'own', desc: 'Kopiert eine eigene Figur auf ein Nachbarfeld.' },
     { id: 'mutate', name: 'Mutation', icon: '🧬', cost: 4, target: 'piece', desc: 'Verwandelt eine Figur (kein König) in eine zufällige andere.' },
+    { id: 'steal', name: 'Taschendieb', icon: '🦝', cost: 3, desc: 'Klaut bis zu 6 Punkte vom reichsten Gegner.' },
     { id: 'quake', name: 'Erdbeben', icon: '🌋', cost: 7, desc: 'Alle Figuren wackeln in zufällige Richtungen.' },
-    { id: 'tornado', name: 'Tornado', icon: '🌪️', cost: 8, desc: 'Wirbelt bis zu 8 zufällige Figuren durcheinander.' },
-    { id: 'army', name: 'Bauern-Armee', icon: '🪖', cost: 6, desc: '3 neue eigene Bauern spawnen auf deiner Hälfte.' },
+    { id: 'tornado', name: 'Tornado', icon: '🌪️', cost: 8, desc: 'Wirbelt bis zu 10 Figuren durcheinander.' },
+    { id: 'army', name: 'Bauern-Armee', icon: '🪖', cost: 6, desc: '3 neue eigene Bauern spawnen bei deiner Armee.' },
+    { id: 'sniper', name: 'Sniper', icon: '🎯', cost: 9, target: 'enemy', desc: 'Schaltet eine gegnerische Figur deiner Wahl aus (kein König).' },
+    { id: 'chain', name: 'Kettenblitz', icon: '🌩️', cost: 12, desc: 'Drei Blitze treffen zufällige gegnerische Figuren.' },
+    { id: 'poison', name: 'Gift', icon: '🧪', cost: 5, target: 'enemy', desc: 'Vergiftet eine Figur – sie stirbt nach zwei Runden.' },
+    { id: 'promote', name: 'Beförderung', icon: '👑', cost: 8, target: 'ownPawn', desc: 'Ein eigener Bauer wird sofort zur Dame.' },
+    { id: 'revive', name: 'Wiederbelebung', icon: '💫', cost: 7, desc: 'Holt eine verlorene Figur zurück aufs Brett.' },
+    { id: 'swap', name: 'Platztausch', icon: '🔁', cost: 6, target: 'own', then: 'enemy', desc: 'Eigene Figur tauscht den Platz mit einer gegnerischen.' },
   ];
+  const PASS_POINTS = 3;
 
   const EVENTS = [
-    { id: 'meteor', name: 'Meteoritenregen', icon: '☄️', desc: '3 Meteoriten schlagen ein!' },
+    { id: 'meteor', name: 'Meteoritenregen', icon: '☄️', desc: 'Meteoriten schlagen ein!' },
     { id: 'lava', name: 'Lava-Ausbruch', icon: '🔥', desc: 'Wer auf Lava landet, verbrennt!' },
     { id: 'ice', name: 'Eiszeit', icon: '🧊', desc: 'Auf Eis rutschen Figuren weiter!' },
     { id: 'rotate', name: 'Brett-Drehung', icon: '🔄', desc: 'Oben ist jetzt unten!' },
-    { id: 'double', name: 'Doppelte Punkte', icon: '💰', desc: '4 Züge lang gibt es doppelte Punkte!' },
+    { id: 'double', name: 'Doppelte Punkte', icon: '💰', desc: 'Eine Runde lang doppelte Punkte!' },
     { id: 'pawns', name: 'Bauern-Sturm', icon: '🏃', desc: 'Alle Bauern rennen ein Feld vor!' },
-    { id: 'swap', name: 'Platztausch', icon: '🔀', desc: 'Zwei zufällige Figuren tauschen die Plätze!' },
-    { id: 'gift', name: 'Geschenk', icon: '🎁', desc: 'Beide bekommen 5 Punkte!' },
-    { id: 'mutation', name: 'Mutations-Welle', icon: '🧪', desc: 'Je 2 Figuren pro Seite mutieren!' },
+    { id: 'swap', name: 'Platztausch', icon: '🔀', desc: 'Zufällige Figuren tauschen die Plätze!' },
+    { id: 'gift', name: 'Geschenk', icon: '🎁', desc: 'Alle bekommen 5 Punkte!' },
+    { id: 'mutation', name: 'Mutations-Welle', icon: '🧪', desc: 'Je 2 Figuren pro Spieler mutieren!' },
     { id: 'quake', name: 'Erdbeben', icon: '🌋', desc: 'Alles wackelt!' },
+    { id: 'frost', name: 'Frost', icon: '🥶', desc: 'Je 2 Figuren pro Spieler frieren ein!' },
   ];
 
   // ---------- Grundgerüst ----------
-  function mk(s, type, color, moved) {
-    return { id: s.nextId++, type, color, moved: !!moved };
+  function mk(s, type, owner, moved) {
+    const pl = s.players[owner];
+    return { id: s.nextId++, type, owner, moved: !!moved, dir: SEAT_DIR[pl.seat].slice(), shield: 0, frozen: 0, poison: 0 };
   }
   function log(s, msg) {
     s.log.push(msg);
-    if (s.log.length > 80) s.log.shift();
+    if (s.log.length > 100) s.log.shift();
   }
+  const pname = (s, i) => s.players[i].name;
 
-  function newGame(mode) {
+  function valid(s, r, c) {
+    if (r < 0 || c < 0 || r >= s.n || c >= s.n) return false;
+    if (s.n === 14 && (r < 3 || r > 10) && (c < 3 || c > 10)) return false;
+    return true;
+  }
+  const at = (s, r, c) => (valid(s, r, c) ? s.board[r][c] : null);
+  const isLava = (s, r, c) => s.lava.some((x) => x.r === r && x.c === c);
+  const isIce = (s, r, c) => s.ice.some((x) => x.r === r && x.c === c);
+  const ally = (s, a, b) => s.players[a].team === s.players[b].team;
+  const shielded = (s, p) => p && p.shield > s.ply;
+  const frozen = (s, p) => p && p.frozen > s.ply;
+  const aliveCount = (s) => s.players.filter((p) => p.alive).length;
+
+  function newGame(opts) {
+    const names = opts.names;
+    const count = names.length;
+    const teams = !!opts.teams && count === 4;
+    const seats = SEATS_BY_COUNT[count];
+    const colors = COLORS_BY_COUNT[count];
+    const n = count === 2 ? 8 : 14;
     const s = {
-      mode, board: [], turn: 'w', ep: null, points: { w: 0, b: 0 }, ply: 0,
-      lava: [], ice: [], doubleUntil: 0, flipped: false, skip: null, abilityUsed: false,
-      winner: null, result: null, log: [], nextId: 1, lastMove: null, check: null, eventEvery: 4,
+      mode: opts.mode, n, teams,
+      players: names.map((name, i) => ({
+        name: name || COLOR_NAMES[colors[i]], seat: seats[i], color: colors[i], alive: true, offline: false,
+        team: teams ? (seats[i] === 'S' || seats[i] === 'N' ? 0 : 1) : i, points: 0, lost: [],
+      })),
+      board: [], turn: 0, ep: null, ply: 0, lava: [], ice: [], doubleUntil: 0, rot: 0,
+      skip: null, bonus: false, abilityUsed: false, winners: null, result: null,
+      log: [], nextId: 1, lastMove: null, check: [], eventEvery: count * 2,
     };
-    const back = 'rnbqkbnr';
-    for (let r = 0; r < 8; r++) s.board.push(Array(8).fill(null));
-    for (let c = 0; c < 8; c++) {
-      s.board[0][c] = mk(s, back[c], 'b');
-      s.board[1][c] = mk(s, 'p', 'b');
-      s.board[6][c] = mk(s, 'p', 'w');
-      s.board[7][c] = mk(s, back[c], 'w');
+    for (let r = 0; r < n; r++) s.board.push(Array(n).fill(null));
+    const idx = (seat) => seats.indexOf(seat);
+    if (n === 8) {
+      const back = 'rnbqkbnr';
+      for (let c = 0; c < 8; c++) {
+        s.board[0][c] = mk(s, back[c], 1);
+        s.board[1][c] = mk(s, 'p', 1);
+        s.board[6][c] = mk(s, 'p', 0);
+        s.board[7][c] = mk(s, back[c], 0);
+      }
+    } else {
+      const backS = 'rnbqkbnr', backN = 'rnbkqbnr';
+      for (let k = 0; k < 8; k++) {
+        const x = 3 + k;
+        if (idx('S') >= 0) { s.board[13][x] = mk(s, backS[k], idx('S')); s.board[12][x] = mk(s, 'p', idx('S')); }
+        if (idx('N') >= 0) { s.board[0][x] = mk(s, backN[k], idx('N')); s.board[1][x] = mk(s, 'p', idx('N')); }
+        if (idx('W') >= 0) { s.board[x][0] = mk(s, backN[k], idx('W')); s.board[x][1] = mk(s, 'p', idx('W')); }
+        if (idx('E') >= 0) { s.board[x][13] = mk(s, backS[k], idx('E')); s.board[x][12] = mk(s, 'p', idx('E')); }
+      }
     }
-    log(s, mode === 'chaos' ? '🔥 CHAOS-MODUS gestartet. Viel Glück!' : '♟️ Klassisches Spiel gestartet.');
+    const modeTxt = opts.mode === 'chaos' ? '🔥 CHAOS-MODUS' : '♟️ Klassisch';
+    log(s, `${modeTxt} mit ${count} Spielern${teams ? ' (2 gegen 2)' : ''} gestartet!`);
     return s;
   }
 
-  const at = (s, r, c) => (inB(r, c) ? s.board[r][c] : null);
-  const isLava = (s, r, c) => s.lava.some((x) => x.r === r && x.c === c);
-  const isIce = (s, r, c) => s.ice.some((x) => x.r === r && x.c === c);
-
   function allPieces(s, filter) {
     const out = [];
-    for (let r = 0; r < 8; r++)
-      for (let c = 0; c < 8; c++) {
+    for (let r = 0; r < s.n; r++)
+      for (let c = 0; c < s.n; c++) {
         const p = s.board[r][c];
         if (p && (!filter || filter(p))) out.push({ p, r, c });
       }
     return out;
   }
-  function emptySquares(s, filter) {
+  function validSquares(s, filter) {
     const out = [];
-    for (let r = 0; r < 8; r++)
-      for (let c = 0; c < 8; c++)
-        if (!s.board[r][c] && !isLava(s, r, c) && (!filter || filter(r, c))) out.push({ r, c });
+    for (let r = 0; r < s.n; r++)
+      for (let c = 0; c < s.n; c++) if (valid(s, r, c) && (!filter || filter(r, c))) out.push({ r, c });
     return out;
   }
+  const emptySquares = (s, filter) => validSquares(s, (r, c) => !s.board[r][c] && !isLava(s, r, c) && (!filter || filter(r, c)));
 
   // ---------- Angriffe & Züge ----------
+  function pawnDiags(p, r, c) {
+    const [dr, dc] = p.dir;
+    return dr ? [[r + dr, c - 1], [r + dr, c + 1]] : [[r - 1, c + dc], [r + 1, c + dc]];
+  }
+
   function attacksFrom(s, r, c) {
     const p = s.board[r][c];
     const out = [];
     if (!p) return out;
-    const add = (rr, cc) => { if (inB(rr, cc)) out.push([rr, cc]); };
-    if (p.type === 'p') {
-      const d = p.color === 'w' ? -1 : 1;
-      add(r + d, c - 1); add(r + d, c + 1);
-    } else if (p.type === 'n') {
-      for (const [a, b] of KN) add(r + a, c + b);
-    } else if (p.type === 'k') {
-      for (const [a, b] of K8) add(r + a, c + b);
-    } else {
+    const add = (rr, cc) => { if (valid(s, rr, cc)) out.push([rr, cc]); };
+    if (p.type === 'p') for (const [rr, cc] of pawnDiags(p, r, c)) add(rr, cc);
+    else if (p.type === 'n') for (const [a, b] of KN) add(r + a, c + b);
+    else if (p.type === 'k') for (const [a, b] of K8) add(r + a, c + b);
+    else {
       const dirs = p.type === 'b' ? DIAG : p.type === 'r' ? ORTH : K8;
       for (const [a, b] of dirs) {
         let rr = r + a, cc = c + b;
-        while (inB(rr, cc)) {
+        while (valid(s, rr, cc)) {
           out.push([rr, cc]);
           if (s.board[rr][cc]) break;
           rr += a; cc += b;
@@ -120,55 +174,62 @@
     return out;
   }
 
-  function attacked(s, r, c, by) {
-    for (const { r: pr, c: pc } of allPieces(s, (p) => p.color === by))
+  function attackedBy(s, r, c, victim) {
+    for (const { p, r: pr, c: pc } of allPieces(s, (p) => !ally(s, p.owner, victim)))
       if (attacksFrom(s, pr, pc).some(([a, b]) => a === r && b === c)) return true;
     return false;
   }
-  function kingPos(s, color) {
-    const k = allPieces(s, (p) => p.type === 'k' && p.color === color)[0];
+  function kingPos(s, owner) {
+    const k = allPieces(s, (p) => p.type === 'k' && p.owner === owner)[0];
     return k ? [k.r, k.c] : null;
   }
-  function inCheck(s, color) {
-    const k = kingPos(s, color);
-    return k ? attacked(s, k[0], k[1], opp(color)) : false;
+  function inCheck(s, owner) {
+    const k = kingPos(s, owner);
+    return k ? attackedBy(s, k[0], k[1], owner) : false;
+  }
+
+  function canLand(s, p, rr, cc) {
+    if (!valid(s, rr, cc)) return false;
+    const t = s.board[rr][cc];
+    if (!t) return true;
+    if (ally(s, t.owner, p.owner) || shielded(s, t)) return false;
+    if (t.type === 'k' && s.bonus) return false; // Extra-Zug nach Skip: König tabu
+    return true;
   }
 
   function pseudoMoves(s, r, c) {
     const p = s.board[r][c];
-    if (!p) return [];
+    if (!p || frozen(s, p)) return [];
     const out = [];
     if (p.type === 'p') {
-      const d = p.color === 'w' ? -1 : 1;
-      if (inB(r + d, c) && !s.board[r + d][c]) {
-        out.push({ r: r + d, c });
-        if (!p.moved && inB(r + 2 * d, c) && !s.board[r + 2 * d][c]) out.push({ r: r + 2 * d, c, dbl: true });
+      const [dr, dc] = p.dir;
+      const f1 = [r + dr, c + dc], f2 = [r + 2 * dr, c + 2 * dc];
+      if (valid(s, f1[0], f1[1]) && !s.board[f1[0]][f1[1]]) {
+        out.push({ r: f1[0], c: f1[1] });
+        if (!p.moved && valid(s, f2[0], f2[1]) && !s.board[f2[0]][f2[1]]) out.push({ r: f2[0], c: f2[1], dbl: true });
       }
-      for (const dc of [-1, 1]) {
-        const rr = r + d, cc = c + dc;
-        if (!inB(rr, cc)) continue;
+      for (const [rr, cc] of pawnDiags(p, r, c)) {
+        if (!valid(s, rr, cc)) continue;
         const t = s.board[rr][cc];
-        if (t && t.color !== p.color) out.push({ r: rr, c: cc });
-        else if (!t && s.ep && s.ep.r === rr && s.ep.c === cc) {
-          const vp = at(s, r, cc);
-          if (vp && vp.type === 'p' && vp.color !== p.color) out.push({ r: rr, c: cc, ep: true });
+        if (t) { if (canLand(s, p, rr, cc)) out.push({ r: rr, c: cc }); }
+        else if (s.ep && s.ep.r === rr && s.ep.c === cc && !ally(s, s.ep.owner, p.owner)) {
+          const v = at(s, s.ep.vr, s.ep.vc);
+          if (v && v.type === 'p' && !shielded(s, v)) out.push({ r: rr, c: cc, ep: true });
         }
       }
     } else {
-      for (const [rr, cc] of attacksFrom(s, r, c)) {
-        const t = s.board[rr][cc];
-        if (!t || t.color !== p.color) out.push({ r: rr, c: cc });
-      }
-      if (p.type === 'k' && !p.moved && c === 4 && !inCheck(s, p.color)) {
+      for (const [rr, cc] of attacksFrom(s, r, c)) if (canLand(s, p, rr, cc)) out.push({ r: rr, c: cc });
+      // Rochade nur auf dem 8×8-Brett
+      if (s.n === 8 && p.type === 'k' && !p.moved && c === 4 && !inCheck(s, p.owner)) {
         const sides = [
           { rc: 7, step: 1, between: [5, 6], pass: [5, 6] },
           { rc: 0, step: -1, between: [1, 2, 3], pass: [3, 2] },
         ];
         for (const sd of sides) {
           const rook = at(s, r, sd.rc);
-          if (rook && rook.type === 'r' && rook.color === p.color && !rook.moved &&
+          if (rook && rook.type === 'r' && rook.owner === p.owner && !rook.moved && !frozen(s, rook) &&
             sd.between.every((x) => !s.board[r][x]) &&
-            sd.pass.every((x) => !attacked(s, r, x, opp(p.color)) && !isLava(s, r, x)))
+            sd.pass.every((x) => !attackedBy(s, r, x, p.owner) && !isLava(s, r, x)))
             out.push({ r, c: c + 2 * sd.step, castle: sd.rc });
         }
       }
@@ -176,81 +237,125 @@
     return out.filter((m) => !(p.type === 'k' && isLava(s, m.r, m.c)));
   }
 
+  const classicMate = (s) => s.mode === 'classic' && s.players.length === 2;
+
   function leavesKingSafe(s, fr, fc, m) {
     const p = s.board[fr][fc];
     const b = s.board.map((row) => row.slice());
     b[m.r][m.c] = p;
     b[fr][fc] = null;
-    if (m.ep) b[fr][m.c] = null;
-    return !inCheck({ board: b, lava: s.lava, ep: null }, p.color);
+    if (m.ep) b[s.ep.vr][s.ep.vc] = null;
+    return !inCheck(Object.assign({}, s, { board: b }), p.owner);
   }
 
   function legalMoves(s, r, c) {
     const moves = pseudoMoves(s, r, c);
-    if (s.mode === 'chaos') return moves; // Im Chaos: König kann geschlagen werden
+    if (!classicMate(s)) return moves; // sonst gilt: König schlagen gewinnt
     return moves.filter((m) => leavesKingSafe(s, r, c, m));
   }
-  function hasAnyMove(s, color) {
-    return allPieces(s, (p) => p.color === color).some(({ r, c }) => legalMoves(s, r, c).length > 0);
+  function hasAnyMove(s, owner) {
+    return allPieces(s, (p) => p.owner === owner).some(({ r, c }) => legalMoves(s, r, c).length > 0);
   }
 
   // ---------- Hilfen ----------
-  function gain(s, color, n) {
+  function gain(s, who, n) {
     if (s.mode !== 'chaos' || n <= 0) return;
-    const mult = s.ply < s.doubleUntil ? 2 : 1;
-    s.points[color] += n * mult;
+    s.players[who].points += n * (s.ply < s.doubleUntil ? 2 : 1);
+  }
+  function lose(s, p) {
+    if (p && p.type !== 'k' && s.players[p.owner]) s.players[p.owner].lost.push(p.type);
   }
   function destroy(s, r, c, fx, kind, by) {
     const p = at(s, r, c);
-    if (!p || p.type === 'k') return false;
+    if (!p || p.type === 'k' || shielded(s, p)) return false;
+    lose(s, p);
     s.board[r][c] = null;
-    fx.push({ type: 'capture', r, c, color: p.color, kind });
-    if (by && p.color !== by) gain(s, by, Math.ceil(VAL[p.type] / 2));
+    fx.push({ type: 'capture', r, c, color: s.players[p.owner].color, kind });
+    if (by !== undefined && !ally(s, p.owner, by)) gain(s, by, Math.ceil(VAL[p.type] / 2));
     return true;
   }
-  function randomType(exclude, allowPawn) {
-    const t = ['q', 'r', 'b', 'n', 'p'].filter((x) => x !== exclude && (allowPawn || x !== 'p'));
-    return pick(t);
+  function atEdge(s, p, r, c) {
+    return !valid(s, r + p.dir[0], c + p.dir[1]);
   }
   function mutatePiece(s, r, c, fx) {
     const p = s.board[r][c];
     if (!p || p.type === 'k') return;
     const old = p.type;
-    p.type = randomType(old, r !== 0 && r !== 7);
+    const opts = ['q', 'r', 'b', 'n', 'p'].filter((x) => x !== old && (x !== 'p' || !atEdge(s, p, r, c)));
+    p.type = pick(opts);
     if (p.type === 'p') p.moved = true;
     fx.push({ type: 'mutate', r, c });
-    log(s, `🧬 ${CN[p.color]}er ${NAMES[old]} wird zum ${NAMES[p.type]}!`);
+    log(s, `🧬 ${NAMES[old]} von ${pname(s, p.owner)} wird zum ${NAMES[p.type]}!`);
   }
-  // Nach Chaos aufräumen: Bauern auf letzter Reihe befördern, Lava verbrennt
+  // Nach Chaos aufräumen: Bauern am Rand befördern, Lava verbrennt
   function normalize(s, fx) {
     for (const { p, r, c } of allPieces(s)) {
-      if (p.type === 'p' && ((p.color === 'w' && r === 0) || (p.color === 'b' && r === 7))) {
+      if (p.type === 'p' && atEdge(s, p, r, c)) {
         p.type = s.mode === 'chaos' ? pick(['q', 'q', 'r', 'b', 'n']) : 'q';
         fx.push({ type: 'promote', r, c });
-        log(s, `✨ ${CN[p.color]}er Bauer wird zur Figur: ${NAMES[p.type]}!`);
+        log(s, `✨ Bauer von ${pname(s, p.owner)} wird zur Figur: ${NAMES[p.type]}!`);
       }
-      if (p.type !== 'k' && isLava(s, r, c)) {
+      if (p.type !== 'k' && isLava(s, r, c) && !shielded(s, p)) {
+        lose(s, p);
         s.board[r][c] = null;
-        fx.push({ type: 'burn', r, c, color: p.color });
-        log(s, `🔥 ${CN[p.color]}er ${NAMES[p.type]} verbrennt in der Lava!`);
+        fx.push({ type: 'burn', r, c, color: s.players[p.owner].color });
+        log(s, `🔥 ${NAMES[p.type]} von ${pname(s, p.owner)} verbrennt in der Lava!`);
       }
     }
   }
   function updateCheck(s) {
-    s.check = !s.winner && inCheck(s, s.turn) ? s.turn : null;
+    s.check = s.winners ? [] : s.players.map((pl, i) => i).filter((i) => s.players[i].alive && inCheck(s, i));
+  }
+  function nextAlive(s, from) {
+    const n = s.players.length;
+    for (let k = 1; k <= n; k++) {
+      const i = (from + k) % n;
+      if (s.players[i].alive) return i;
+    }
+    return from;
+  }
+
+  // Spieler ausgeschieden: Armee geht an den Königs-Killer
+  function eliminate(s, victim, killer, fx) {
+    const v = s.players[victim];
+    v.alive = false;
+    let n = 0;
+    for (const { p, r, c } of allPieces(s, (p) => p.owner === victim)) {
+      p.owner = killer;
+      p.shield = 0;
+      p.frozen = 0;
+      p.poison = 0;
+      fx.push({ type: 'takeover', r, c, color: s.players[killer].color });
+      n++;
+    }
+    const loot = Math.floor(v.points / 2);
+    s.players[killer].points += loot;
+    v.points = 0;
+    if (s.skip === victim) s.skip = null;
+    log(s, `💀 ${v.name} ist raus! ${pname(s, killer)} übernimmt ${n} Figuren${loot ? ` und ${loot} Punkte` : ''}.`);
+    fx.push({ type: 'banner', icon: '💀', title: `${v.name} ist raus!`, sub: `${pname(s, killer)} übernimmt die Armee`, sound: 'event' });
+
+    const teamsLeft = [...new Set(s.players.filter((p) => p.alive).map((p) => p.team))];
+    if (teamsLeft.length <= 1) {
+      s.winners = s.players.map((p, i) => i).filter((i) => s.players[i].team === teamsLeft[0]);
+      s.result = s.teams ? 'Das Team hat alle Könige erledigt! 👑' : 'Der letzte König steht! 👑';
+      log(s, `🏆 ${s.winners.map((i) => pname(s, i)).join(' & ')} gewinnt!`);
+      fx.push({ type: 'win' });
+      s.check = [];
+    }
   }
 
   // ---------- Zug ausführen ----------
-  function doMove(s, color, fr, fc, tr, tc) {
+  function doMove(s, who, fr, fc, tr, tc) {
     const fx = [];
-    if (s.winner || s.turn !== color) return null;
+    if (s.winners || s.turn !== who) return null;
     const p = at(s, fr, fc);
-    if (!p || p.color !== color) return null;
+    if (!p || p.owner !== who) return null;
     const m = legalMoves(s, fr, fc).find((x) => x.r === tr && x.c === tc);
     if (!m) return null;
 
     let captured = s.board[tr][tc];
-    if (m.ep) { captured = s.board[fr][tc]; s.board[fr][tc] = null; }
+    if (m.ep) { captured = s.board[s.ep.vr][s.ep.vc]; s.board[s.ep.vr][s.ep.vc] = null; }
     s.board[tr][tc] = p;
     s.board[fr][fc] = null;
     p.moved = true;
@@ -260,34 +365,26 @@
       s.board[fr][rc] = rook;
       s.board[fr][m.castle] = null;
       rook.moved = true;
-      log(s, `🏰 ${CN[color]} rochiert.`);
+      log(s, `🏰 ${pname(s, who)} rochiert.`);
     }
-    s.ep = m.dbl ? { r: (fr + tr) / 2, c: fc } : null;
+    s.ep = m.dbl ? { r: (fr + tr) / 2, c: (fc + tc) / 2, vr: tr, vc: tc, owner: who } : null;
 
     if (captured) {
-      fx.push({ type: 'capture', r: tr, c: tc, color: captured.color, kind: 'hit' });
-      gain(s, color, VAL[captured.type]);
-      log(s, `⚔️ ${CN[color]}er ${NAMES[p.type]} schlägt ${NAMES[captured.type]}` + (s.mode === 'chaos' && VAL[captured.type] ? ` (+${VAL[captured.type] * (s.ply < s.doubleUntil ? 2 : 1)})` : ''));
-      if (captured.type === 'k') {
-        s.winner = color;
-        s.result = 'Der König wurde geschlagen! 👑💀';
-        s.lastMove = { fr, fc, tr, tc };
-        fx.push({ type: 'win' });
-        log(s, `🏆 ${CN[color]} gewinnt!`);
-        s.ply++;
-        s.check = null;
-        return fx;
-      }
-    } else {
-      fx.push({ type: 'move' });
-    }
+      lose(s, captured);
+      const mult = s.ply < s.doubleUntil ? 2 : 1;
+      fx.push({ type: 'capture', r: tr, c: tc, color: s.players[captured.owner].color, kind: 'hit' });
+      gain(s, who, VAL[captured.type]);
+      log(s, `⚔️ ${NAMES[p.type]} von ${pname(s, who)} schlägt ${NAMES[captured.type]} von ${pname(s, captured.owner)}` +
+        (s.mode === 'chaos' && VAL[captured.type] ? ` (+${VAL[captured.type] * mult})` : ''));
+      if (captured.type === 'k') eliminate(s, captured.owner, who, fx);
+    } else fx.push({ type: 'move' });
 
     // Eis: weiterrutschen
     let cr = tr, cc = tc;
     if (s.mode === 'chaos' && m.castle === undefined && isIce(s, tr, tc)) {
       const dr = sign(tr - fr), dc = sign(tc - fc);
       let steps = 0;
-      while (steps < 4 && isIce(s, cr, cc) && inB(cr + dr, cc + dc) && !s.board[cr + dr][cc + dc] &&
+      while (steps < 4 && isIce(s, cr, cc) && valid(s, cr + dr, cc + dc) && !s.board[cr + dr][cc + dc] &&
         !(p.type === 'k' && isLava(s, cr + dr, cc + dc))) {
         s.board[cr + dr][cc + dc] = p;
         s.board[cr][cc] = null;
@@ -297,7 +394,8 @@
     }
     s.lastMove = { fr, fc, tr: cr, tc: cc };
     normalize(s, fx);
-    gain(s, color, 1);
+    if (s.winners) { s.ply++; return fx; }
+    gain(s, who, 1);
     endTurn(s, fx);
     return fx;
   }
@@ -305,72 +403,136 @@
   function endTurn(s, fx) {
     s.ply++;
     s.abilityUsed = false;
+    s.bonus = false;
     s.lava = s.lava.filter((x) => x.until > s.ply);
     s.ice = s.ice.filter((x) => x.until > s.ply);
+    for (const { p, r, c } of allPieces(s, (p) => p.poison && p.poison <= s.ply)) {
+      p.poison = 0;
+      p.shield = 0;
+      if (destroy(s, r, c, fx, 'poison')) log(s, `🧪 ${NAMES[p.type]} von ${pname(s, p.owner)} erliegt dem Gift!`);
+    }
     if (s.mode === 'chaos' && s.ply % s.eventEvery === 0) randomEvent(s, fx);
 
-    let next = opp(s.turn);
+    const cur = s.turn;
+    let next = nextAlive(s, cur);
     if (s.skip === next) {
       s.skip = null;
-      log(s, `⏭️ ${CN[next]} wird übersprungen!`);
-      fx.push({ type: 'banner', icon: '⏭️', title: `${CN[next]} setzt aus!`, sub: `${CN[s.turn]} ist nochmal dran`, sound: 'skip' });
-      next = s.turn;
-      s.ep = null;
+      log(s, `⏭️ ${pname(s, next)} wird übersprungen!`);
+      fx.push({ type: 'banner', icon: '⏭️', title: `${pname(s, next)} setzt aus!`, sub: 'Zug übersprungen', sound: 'skip' });
+      next = nextAlive(s, next);
+      if (next === cur) { s.bonus = true; s.ep = null; }
     }
     s.turn = next;
 
-    if (s.mode === 'classic') {
+    if (classicMate(s)) {
       const chk = inCheck(s, s.turn);
       if (!hasAnyMove(s, s.turn)) {
         if (chk) {
-          s.winner = opp(s.turn);
+          s.winners = [1 - s.turn];
           s.result = 'Schachmatt! ♚';
-          log(s, `🏆 Schachmatt – ${CN[s.winner]} gewinnt!`);
+          log(s, `🏆 Schachmatt – ${pname(s, s.winners[0])} gewinnt!`);
         } else {
-          s.winner = 'draw';
+          s.winners = [];
           s.result = 'Patt – Unentschieden.';
           log(s, '🤝 Patt!');
         }
         fx.push({ type: 'win' });
       }
-    } else if (!hasAnyMove(s, s.turn)) {
-      log(s, `😵 ${CN[s.turn]} hat keine Züge und muss passen.`);
-      s.turn = opp(s.turn);
-      if (!hasAnyMove(s, s.turn)) {
-        s.winner = 'draw';
+    } else {
+      // Wer offline ist oder nicht ziehen kann, passt automatisch
+      let guard = 0;
+      while ((s.players[s.turn].offline || !hasAnyMove(s, s.turn)) && guard++ < s.players.length) {
+        log(s, s.players[s.turn].offline ? `📴 ${pname(s, s.turn)} ist offline und passt.` : `😵 ${pname(s, s.turn)} kann nicht ziehen und passt.`);
+        s.turn = nextAlive(s, s.turn);
+        s.bonus = false;
+      }
+      if (guard > s.players.length) {
+        s.winners = [];
         s.result = 'Niemand kann mehr ziehen – Unentschieden.';
         fx.push({ type: 'win' });
       }
     }
     updateCheck(s);
-    if (s.check) fx.push({ type: 'check' });
+    if (s.check.length) fx.push({ type: 'check' });
+  }
+
+  // Zug passen und dafür Punkte kassieren
+  function doPass(s, who) {
+    if (s.mode !== 'chaos' || s.winners || s.turn !== who) return null;
+    const fx = [{ type: 'pass', who }];
+    gain(s, who, PASS_POINTS);
+    log(s, `💤 ${pname(s, who)} passt und kassiert +${PASS_POINTS * (s.ply < s.doubleUntil ? 2 : 1)} Punkte.`);
+    s.lastMove = null;
+    s.ep = null;
+    endTurn(s, fx);
+    return fx;
+  }
+
+  // Für den Host: Spieler hat die Verbindung verloren
+  function setOffline(s, who, off) {
+    if (!s.players[who]) return null;
+    s.players[who].offline = off;
+    const fx = [];
+    if (off && s.turn === who && !s.winners) {
+      log(s, `📴 ${pname(s, who)} hat das Spiel verlassen.`);
+      s.ply--; // endTurn zählt wieder hoch, ohne Event doppelt auszulösen
+      s.abilityUsed = false;
+      const ev = s.mode;
+      s.mode = 'classic-skip';
+      endTurn(s, fx);
+      s.mode = ev;
+    }
+    return fx;
   }
 
   // ---------- Fähigkeiten ----------
-  function useAbility(s, color, id, target) {
+  function validTarget(s, who, id, r, c, step) {
+    const ab = ABILITIES.find((a) => a.id === id);
+    if (!ab || !valid(s, r, c)) return false;
+    const kind = step === 2 ? ab.then : ab.target;
+    const p = s.board[r][c];
+    switch (kind) {
+      case 'square': return true;
+      case 'empty': return !p && !isLava(s, r, c);
+      case 'piece': return !!p && p.type !== 'k' && !shielded(s, p);
+      case 'own': return !!p && p.owner === who && p.type !== 'k';
+      case 'ownAny': return !!p && p.owner === who;
+      case 'ownPawn': return !!p && p.owner === who && p.type === 'p';
+      case 'enemy': return !!p && !ally(s, p.owner, who) && p.type !== 'k' && !shielded(s, p);
+    }
+    return false;
+  }
+
+  function abilityBlocked(s, who, id) {
+    if (id === 'skip' && (s.bonus || aliveCount(s) < 2)) return 'Im Extra-Zug nicht erlaubt';
+    if (id === 'revive' && !s.players[who].lost.length) return 'Keine verlorenen Figuren';
+    return null;
+  }
+
+  function useAbility(s, who, id, target) {
     const fx = [];
     const ab = ABILITIES.find((a) => a.id === id);
-    if (!ab || s.mode !== 'chaos' || s.winner || s.turn !== color || s.abilityUsed) return null;
-    if (s.points[color] < ab.cost) return null;
-    if (ab.target && (!target || !inB(target.r, target.c))) return null;
-    if (ab.target === 'piece') {
-      const tp = at(s, target.r, target.c);
-      if (!tp || tp.type === 'k') return null;
-    }
-    const enemy = opp(color);
+    if (!ab || s.mode !== 'chaos' || s.winners || s.turn !== who || s.abilityUsed) return null;
+    const me = s.players[who];
+    if (me.points < ab.cost || abilityBlocked(s, who, id)) return null;
+    if (ab.target && (!target || !validTarget(s, who, id, target.r, target.c, 1))) return null;
+    if (ab.then && (target.r2 === undefined || !validTarget(s, who, id, target.r2, target.c2, 2))) return null;
+    const enemies = s.players.map((p, i) => i).filter((i) => s.players[i].alive && !ally(s, i, who));
 
     switch (id) {
-      case 'skip':
-        s.skip = enemy;
-        fx.push({ type: 'banner', icon: '⏭️', title: 'ZUG-SKIP!', sub: `${CN[enemy]} muss gleich aussetzen`, sound: 'skip' });
+      case 'skip': {
+        const victim = nextAlive(s, who);
+        s.skip = victim;
+        fx.push({ type: 'banner', icon: '⏭️', title: 'ZUG-SKIP!', sub: `${pname(s, victim)} muss gleich aussetzen`, sound: 'skip' });
         break;
+      }
       case 'blitz': {
-        const c = allPieces(s, (p) => p.color === enemy && p.type !== 'k');
+        const c = allPieces(s, (p) => enemies.includes(p.owner) && p.type !== 'k' && !shielded(s, p));
         if (!c.length) return null;
         const t = pick(c);
         fx.push({ type: 'blitz', r: t.r, c: t.c });
-        log(s, `⚡ Blitz trifft ${CN[enemy]}en ${NAMES[t.p.type]}!`);
-        destroy(s, t.r, t.c, fx, 'zap', color);
+        log(s, `⚡ Blitz trifft ${NAMES[t.p.type]} von ${pname(s, t.p.owner)}!`);
+        destroy(s, t.r, t.c, fx, 'zap', who);
         break;
       }
       case 'bomb': {
@@ -378,41 +540,159 @@
         let n = 0;
         for (let dr = -1; dr <= 1; dr++)
           for (let dc = -1; dc <= 1; dc++)
-            if (destroy(s, target.r + dr, target.c + dc, fx, 'boom', color)) n++;
-        log(s, `💣 BOOM! ${CN[color]} sprengt ${n} Figur(en) weg.`);
+            if (destroy(s, target.r + dr, target.c + dc, fx, 'boom', who)) n++;
+        log(s, `💣 BOOM! ${me.name} sprengt ${n} Figur(en) weg.`);
+        break;
+      }
+      case 'kamikaze': {
+        const p = s.board[target.r][target.c];
+        lose(s, p);
+        s.board[target.r][target.c] = null;
+        fx.push({ type: 'capture', r: target.r, c: target.c, color: me.color, kind: 'boom' });
+        fx.push({ type: 'explode', r: target.r, c: target.c, big: false });
+        let n = 0;
+        for (let dr = -1; dr <= 1; dr++)
+          for (let dc = -1; dc <= 1; dc++)
+            if ((dr || dc) && destroy(s, target.r + dr, target.c + dc, fx, 'boom', who)) n++;
+        log(s, `🧨 ${NAMES[p.type]} von ${me.name} geht hoch und nimmt ${n} Figur(en) mit!`);
+        break;
+      }
+      case 'teleport': {
+        const p = s.board[target.r][target.c];
+        s.board[target.r][target.c] = null;
+        s.board[target.r2][target.c2] = p;
+        p.moved = true;
+        fx.push({ type: 'teleport', r: target.r, c: target.c, r2: target.r2, c2: target.c2 });
+        log(s, `🌀 ${NAMES[p.type]} von ${me.name} teleportiert sich!`);
+        break;
+      }
+      case 'shield': {
+        const p = s.board[target.r][target.c];
+        p.shield = s.ply + aliveCount(s);
+        fx.push({ type: 'shield', r: target.r, c: target.c });
+        log(s, `🛡️ ${me.name} schützt ${p.type === 'k' ? 'den König' : 'einen ' + NAMES[p.type]} für eine Runde.`);
+        break;
+      }
+      case 'freeze': {
+        const p = s.board[target.r][target.c];
+        p.frozen = s.ply + aliveCount(s) + 1;
+        fx.push({ type: 'freeze', r: target.r, c: target.c });
+        log(s, `❄️ ${NAMES[p.type]} von ${pname(s, p.owner)} ist eingefroren!`);
+        break;
+      }
+      case 'clone': {
+        const p = s.board[target.r][target.c];
+        const spots = shuffle(K8.map(([a, b]) => ({ r: target.r + a, c: target.c + b }))
+          .filter(({ r, c }) => valid(s, r, c) && !s.board[r][c] && !isLava(s, r, c)));
+        if (!spots.length) return null;
+        const { r, c } = spots[0];
+        const cl = mk(s, p.type, who, true);
+        cl.dir = p.dir.slice();
+        if (cl.type === 'p' && atEdge(s, cl, r, c)) cl.type = 'q';
+        s.board[r][c] = cl;
+        fx.push({ type: 'spawn', r, c });
+        log(s, `👯 ${me.name} klont einen ${NAMES[p.type]}!`);
         break;
       }
       case 'mutate':
         mutatePiece(s, target.r, target.c, fx);
         break;
+      case 'sniper': {
+        const p = s.board[target.r][target.c];
+        fx.push({ type: 'snipe', r: target.r, c: target.c });
+        log(s, `🎯 ${me.name} schaltet ${NAMES[p.type]} von ${pname(s, p.owner)} aus!`);
+        destroy(s, target.r, target.c, fx, 'zap', who);
+        break;
+      }
+      case 'chain': {
+        const c = shuffle(allPieces(s, (p) => enemies.includes(p.owner) && p.type !== 'k' && !shielded(s, p))).slice(0, 3);
+        if (!c.length) return null;
+        c.forEach((t, i) => {
+          fx.push({ type: 'blitz', r: t.r, c: t.c, delay: i * 280 });
+          destroy(s, t.r, t.c, fx, 'zap', who);
+        });
+        log(s, `🌩️ Kettenblitz! ${c.length} Figuren gegrillt.`);
+        break;
+      }
+      case 'poison': {
+        const p = s.board[target.r][target.c];
+        p.poison = s.ply + aliveCount(s) * 2;
+        fx.push({ type: 'poison', r: target.r, c: target.c });
+        log(s, `🧪 ${NAMES[p.type]} von ${pname(s, p.owner)} ist vergiftet!`);
+        break;
+      }
+      case 'promote': {
+        const p = s.board[target.r][target.c];
+        p.type = 'q';
+        fx.push({ type: 'promote', r: target.r, c: target.c });
+        log(s, `👑 ${me.name} befördert einen Bauern zur Dame!`);
+        break;
+      }
+      case 'revive': {
+        if (!me.lost.length) return null;
+        const mine = allPieces(s, (p) => p.owner === who);
+        const near = shuffle(emptySquares(s, (r, c) => mine.some((m) => Math.abs(m.r - r) <= 1 && Math.abs(m.c - c) <= 1)));
+        if (!near.length) return null;
+        const li = rnd(me.lost.length);
+        const type = me.lost.splice(li, 1)[0];
+        const { r, c } = near[0];
+        const np = mk(s, type, who, true);
+        if (np.type === 'p' && atEdge(s, np, r, c)) np.type = 'q';
+        s.board[r][c] = np;
+        fx.push({ type: 'spawn', r, c });
+        log(s, `💫 ${me.name} holt einen ${NAMES[type]} zurück!`);
+        break;
+      }
+      case 'swap': {
+        const a = s.board[target.r][target.c], b = s.board[target.r2][target.c2];
+        s.board[target.r][target.c] = b;
+        s.board[target.r2][target.c2] = a;
+        a.moved = b.moved = true;
+        fx.push({ type: 'teleport', r: target.r, c: target.c, r2: target.r2, c2: target.c2 });
+        log(s, `🔁 ${NAMES[a.type]} von ${me.name} tauscht mit ${NAMES[b.type]} von ${pname(s, b.owner)}!`);
+        break;
+      }
+      case 'steal': {
+        const rich = enemies.slice().sort((a, b) => s.players[b].points - s.players[a].points)[0];
+        if (rich === undefined) return null;
+        const amt = Math.min(6, s.players[rich].points);
+        s.players[rich].points -= amt;
+        me.points += amt;
+        fx.push({ type: 'coins' });
+        log(s, `🦝 ${me.name} klaut ${amt} Punkte von ${pname(s, rich)}!`);
+        break;
+      }
       case 'quake':
         quake(s, fx);
-        log(s, `🌋 ${CN[color]} löst ein Erdbeben aus!`);
+        log(s, `🌋 ${me.name} löst ein Erdbeben aus!`);
         break;
       case 'tornado': {
-        const list = shuffle(allPieces(s, (p) => p.type !== 'k')).slice(0, 8);
-        const squares = shuffle(list.map(({ r, c }) => ({ r, c })));
+        const list = shuffle(allPieces(s, (p) => p.type !== 'k' && !shielded(s, p))).slice(0, 10);
+        const sq = shuffle(list.map(({ r, c }) => ({ r, c })));
         for (const { r, c } of list) s.board[r][c] = null;
-        list.forEach(({ p }, i) => { s.board[squares[i].r][squares[i].c] = p; p.moved = true; });
+        list.forEach(({ p }, i) => { s.board[sq[i].r][sq[i].c] = p; p.moved = true; });
         fx.push({ type: 'tornado' });
         log(s, `🌪️ Tornado! ${list.length} Figuren fliegen durcheinander.`);
         break;
       }
       case 'army': {
-        const rows = color === 'w' ? [4, 5, 6] : [1, 2, 3];
-        const sq = shuffle(emptySquares(s, (r) => rows.includes(r))).slice(0, 3);
+        // Felder nahe den eigenen Figuren
+        const mine = allPieces(s, (p) => p.owner === who);
+        const near = emptySquares(s, (r, c) => mine.some((m) => Math.abs(m.r - r) <= 2 && Math.abs(m.c - c) <= 2));
+        const sq = shuffle(near).slice(0, 3);
         for (const { r, c } of sq) {
-          const start = color === 'w' ? 6 : 1;
-          s.board[r][c] = mk(s, 'p', color, r !== start);
+          const pawn = mk(s, 'p', who, true);
+          if (atEdge(s, pawn, r, c)) pawn.type = 'n';
+          s.board[r][c] = pawn;
           fx.push({ type: 'spawn', r, c });
         }
-        log(s, `🪖 ${sq.length} neue ${CN[color]}e Bauern melden sich zum Dienst!`);
+        log(s, `🪖 ${sq.length} neue Bauern von ${me.name} melden sich zum Dienst!`);
         break;
       }
     }
-    s.points[color] -= ab.cost;
+    me.points -= ab.cost;
     s.abilityUsed = true;
-    fx.unshift({ type: 'ability', id, icon: ab.icon, name: ab.name, color });
+    fx.unshift({ type: 'ability', id, icon: ab.icon, name: ab.name, who });
     normalize(s, fx);
     s.ep = null;
     updateCheck(s);
@@ -421,11 +701,10 @@
 
   function quake(s, fx) {
     for (const { p, r, c } of shuffle(allPieces(s))) {
-      if (s.board[r][c] !== p) continue;
+      if (s.board[r][c] !== p || shielded(s, p) || Math.random() < 0.35) continue;
       const [dr, dc] = pick(K8);
       const nr = r + dr, nc = c + dc;
-      if (!inB(nr, nc) || s.board[nr][nc] || (p.type === 'k' && isLava(s, nr, nc))) continue;
-      if (Math.random() < 0.35) continue;
+      if (!valid(s, nr, nc) || s.board[nr][nc] || (p.type === 'k' && isLava(s, nr, nc))) continue;
       s.board[nr][nc] = p;
       s.board[r][c] = null;
       p.moved = true;
@@ -436,45 +715,46 @@
   // ---------- Chaos-Events ----------
   function randomEvent(s, fx) {
     const ev = pick(EVENTS);
+    const big = s.n === 14;
     fx.push({ type: 'banner', icon: ev.icon, title: ev.name, sub: ev.desc, sound: 'event' });
     log(s, `${ev.icon} EVENT: ${ev.name}!`);
+    const alive = s.players.map((p, i) => i).filter((i) => s.players[i].alive);
     switch (ev.id) {
       case 'meteor': {
-        const sq = [];
-        while (sq.length < 3) {
-          const r = rnd(8), c = rnd(8);
-          if (!sq.some((x) => x.r === r && x.c === c)) sq.push({ r, c });
-        }
+        const sq = shuffle(validSquares(s)).slice(0, big ? 6 : 3);
         sq.forEach(({ r, c }, i) => {
-          fx.push({ type: 'meteor', r, c, delay: 600 + i * 450 });
+          const d = 600 + i * 400;
+          fx.push({ type: 'meteor', r, c, delay: d });
           const p = s.board[r][c];
-          if (p && p.type !== 'k') {
+          if (p && p.type !== 'k' && !shielded(s, p)) {
+            lose(s, p);
             s.board[r][c] = null;
-            fx.push({ type: 'capture', r, c, color: p.color, kind: 'boom', delay: 600 + i * 450 + 400 });
-            log(s, `☄️ Meteor zerstört ${CN[p.color]}en ${NAMES[p.type]}!`);
+            fx.push({ type: 'capture', r, c, color: s.players[p.owner].color, kind: 'boom', delay: d + 400 });
+            log(s, `☄️ Meteor zerstört ${NAMES[p.type]} von ${pname(s, p.owner)}!`);
           }
         });
         break;
       }
       case 'lava':
-        for (const { r, c } of shuffle(emptySquares(s)).slice(0, 4)) s.lava.push({ r, c, until: s.ply + 6 });
+        for (const { r, c } of shuffle(emptySquares(s)).slice(0, big ? 9 : 4)) s.lava.push({ r, c, until: s.ply + s.eventEvery + 2 });
         break;
       case 'ice':
-        for (const { r, c } of shuffle(emptySquares(s, (r, c) => !isIce(s, r, c))).slice(0, 7)) s.ice.push({ r, c, until: s.ply + 8 });
+        for (const { r, c } of shuffle(emptySquares(s, (r, c) => !isIce(s, r, c))).slice(0, big ? 14 : 7)) s.ice.push({ r, c, until: s.ply + s.eventEvery * 2 });
         break;
       case 'rotate':
-        s.flipped = !s.flipped;
+        s.rot = (s.rot + 2) % 4;
         break;
       case 'double':
-        s.doubleUntil = s.ply + 4;
+        s.doubleUntil = s.ply + aliveCount(s);
         break;
       case 'pawns': {
+        // Vorderste Bauern zuerst
         const pawns = allPieces(s, (p) => p.type === 'p');
-        pawns.sort((a, b) => (a.p.color === 'w' ? a.r - b.r : b.r - a.r));
+        pawns.sort((a, b) => (b.r * a.p.dir[0] + b.c * a.p.dir[1]) - (a.r * a.p.dir[0] + a.c * a.p.dir[1]));
         for (const { p, r, c } of pawns) {
-          const d = p.color === 'w' ? -1 : 1;
-          if (inB(r + d, c) && !s.board[r + d][c]) {
-            s.board[r + d][c] = p;
+          const nr = r + p.dir[0], nc = c + p.dir[1];
+          if (s.board[r][c] === p && valid(s, nr, nc) && !s.board[nr][nc] && !frozen(s, p)) {
+            s.board[nr][nc] = p;
             s.board[r][c] = null;
             p.moved = true;
           }
@@ -482,22 +762,30 @@
         break;
       }
       case 'swap': {
-        const c = shuffle(allPieces(s, (p) => p.type !== 'k')).slice(0, 2);
-        if (c.length === 2) {
-          s.board[c[0].r][c[0].c] = c[1].p;
-          s.board[c[1].r][c[1].c] = c[0].p;
-          log(s, `🔀 ${NAMES[c[0].p.type]} und ${NAMES[c[1].p.type]} tauschen!`);
+        const times = big ? 3 : 1;
+        for (let k = 0; k < times; k++) {
+          const c = shuffle(allPieces(s, (p) => p.type !== 'k' && !shielded(s, p))).slice(0, 2);
+          if (c.length === 2) {
+            s.board[c[0].r][c[0].c] = c[1].p;
+            s.board[c[1].r][c[1].c] = c[0].p;
+          }
         }
         break;
       }
       case 'gift':
-        s.points.w += 5;
-        s.points.b += 5;
+        for (const i of alive) s.players[i].points += 5;
         fx.push({ type: 'coins' });
         break;
       case 'mutation':
-        for (const col of ['w', 'b'])
-          for (const t of shuffle(allPieces(s, (p) => p.color === col && p.type !== 'k')).slice(0, 2)) mutatePiece(s, t.r, t.c, fx);
+        for (const i of alive)
+          for (const t of shuffle(allPieces(s, (p) => p.owner === i && p.type !== 'k')).slice(0, 2)) mutatePiece(s, t.r, t.c, fx);
+        break;
+      case 'frost':
+        for (const i of alive)
+          for (const t of shuffle(allPieces(s, (p) => p.owner === i && p.type !== 'k')).slice(0, 2)) {
+            t.p.frozen = s.ply + aliveCount(s) + 1;
+            fx.push({ type: 'freeze', r: t.r, c: t.c });
+          }
         break;
       case 'quake':
         quake(s, fx);
@@ -507,5 +795,8 @@
     s.ep = null;
   }
 
-  window.Engine = { newGame, legalMoves, doMove, useAbility, ABILITIES, EVENTS, NAMES, CN, VAL, opp, isLava, isIce };
+  window.Engine = {
+    newGame, legalMoves, doMove, doPass, PASS_POINTS, useAbility, validTarget, abilityBlocked, setOffline, valid,
+    ABILITIES, EVENTS, NAMES, VAL, COLOR_NAMES, isLava, isIce, shielded, frozen,
+  };
 })();

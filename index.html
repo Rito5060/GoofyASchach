@@ -4,61 +4,91 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>GoofyASchach</title>
-  <meta name="description" content="Chaos-Schach mit Freunden: Fähigkeiten, Bomben, Blitze und verrückte Events.">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>♞</text></svg>">
+  <meta name="description" content="Chaos-Schach mit bis zu 4 Freunden: Fähigkeiten, Bomben, Blitze und verrückte Events.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='18' fill='%23ff5a36'/><text x='50' y='76' font-size='70' text-anchor='middle' fill='white'>♞</text></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Bungee&family=Nunito:wght@400;700;900&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;700;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <div id="app">
     <header>
-      <h1 class="logo">Goofy<span>A</span>Schach</h1>
+      <a class="logo" href="./"><span class="logo-mark">&#9822;&#xFE0E;</span>GoofyASchach</a>
       <span id="modeTag" class="tag hidden"></span>
-      <button id="btnMute" class="icon-btn" title="Ton an/aus">🔊</button>
+      <button id="btnMute" class="icon-btn" title="Ton an/aus" aria-label="Ton an/aus">🔊</button>
     </header>
 
     <!-- LOBBY -->
     <section id="lobby" class="screen">
-      <div class="card lobby-card">
-        <div class="hero">
-          <span class="float">♚</span><span class="float d1">💣</span><span class="float d2">♞</span><span class="float d3">⚡</span><span class="float d4">♛</span>
+      <div class="lobby-grid">
+        <div class="intro">
+          <h1>Schach,<br>aber kaputt.</h1>
+          <p>Spiel mit bis zu drei Freunden. Sammle Punkte, kauf dir Bomben, Blitze und Teleporter, und überleb Meteoriten, Lava und Eis.</p>
+          <ul class="facts">
+            <li><b>2–4</b><span>Spieler</span></li>
+            <li><b>19</b><span>Fähigkeiten</span></li>
+            <li><b>11</b><span>Chaos-Events</span></li>
+          </ul>
         </div>
-        <p class="tagline">Schach. Aber mit Bomben, Blitzen, Lava und purem Chaos.</p>
 
-        <div id="lobbyMain">
-          <h2>Modus</h2>
-          <div class="modes">
-            <button class="mode-btn active" data-mode="chaos">
-              <span class="mi">🔥</span><b>Chaos</b><small>Punkte, Fähigkeiten-Shop &amp; zufällige Events. König schlagen = Sieg.</small>
-            </button>
-            <button class="mode-btn" data-mode="classic">
-              <span class="mi">♟️</span><b>Klassisch</b><small>Ganz normales Schach mit Schachmatt.</small>
-            </button>
-          </div>
+        <div id="lobbyMain" class="panel">
+          <label class="field">
+            <span>Dein Name</span>
+            <input id="playerName" maxlength="14" placeholder="z.B. Oskar" autocomplete="off">
+          </label>
 
-          <div class="actions">
-            <button id="btnCreate" class="btn big primary">🎮 Raum erstellen</button>
-            <div class="join">
-              <input id="joinCode" maxlength="5" placeholder="CODE" autocomplete="off" spellcheck="false">
-              <button id="btnJoin" class="btn">Beitreten</button>
+          <div class="field">
+            <span>Modus</span>
+            <div class="seg" id="modeSeg">
+              <button data-v="chaos" class="on">Chaos</button>
+              <button data-v="classic">Klassisch</button>
             </div>
-            <button id="btnLocal" class="btn ghost">👥 Lokal an einem Gerät spielen</button>
           </div>
+
+          <div class="field">
+            <span>Spielart <small>(2 gegen 2 nur mit 4 Spielern)</small></span>
+            <div class="seg" id="teamSeg">
+              <button data-v="ffa" class="on">Jeder gegen jeden</button>
+              <button data-v="teams">2 gegen 2</button>
+            </div>
+          </div>
+
+          <button id="btnCreate" class="btn primary wide">Raum erstellen</button>
+          <div class="join">
+            <input id="joinCode" maxlength="5" placeholder="CODE" autocomplete="off" spellcheck="false">
+            <button id="btnJoin" class="btn">Beitreten</button>
+          </div>
+
+          <div class="divider"><span>oder an einem Gerät</span></div>
+          <div class="local">
+            <div class="seg small" id="localSeg">
+              <button data-v="2" class="on">2</button>
+              <button data-v="3">3</button>
+              <button data-v="4">4</button>
+            </div>
+            <button id="btnLocal" class="btn">Lokal spielen</button>
+          </div>
+          <p id="lobbyStatus" class="status-msg"></p>
         </div>
 
-        <div id="roomInfo" class="hidden">
-          <h2>Dein Raum-Code</h2>
-          <div id="roomCode" class="room-code">…</div>
-          <div class="link-row">
+        <div id="roomPanel" class="panel hidden">
+          <div class="room-head">
+            <span class="label">Raum-Code</span>
+            <div id="roomCode" class="room-code">·····</div>
+            <span id="roomSummary" class="label"></span>
+          </div>
+          <div id="linkRow" class="link-row">
             <input id="roomLink" readonly>
-            <button id="btnCopy" class="btn">Link kopieren</button>
+            <button id="btnCopy" class="btn">Kopieren</button>
           </div>
-          <div class="spinner"></div>
-          <button id="btnCancelRoom" class="btn ghost">Abbrechen</button>
+          <div class="field">
+            <span>Spieler <small id="roomCount"></small></span>
+            <ul id="roomPlayers"></ul>
+          </div>
+          <p id="roomHint" class="status-msg"></p>
+          <button id="btnStart" class="btn primary wide hidden">Spiel starten</button>
+          <button id="btnLeave" class="btn ghost wide">Verlassen</button>
         </div>
-
-        <p id="lobbyStatus" class="status-msg"></p>
       </div>
     </section>
 
@@ -66,34 +96,34 @@
     <section id="game" class="screen hidden">
       <div class="layout">
         <div class="board-col">
-          <div id="pTop" class="player"><span class="pdot"></span><span class="pname"></span><span class="pbadges"></span><span class="ppoints"></span></div>
+          <div id="players"></div>
           <div id="boardWrap">
             <div id="board">
               <div id="squares"></div>
               <div id="pieces"></div>
             </div>
           </div>
-          <div id="pBottom" class="player"><span class="pdot"></span><span class="pname"></span><span class="pbadges"></span><span class="ppoints"></span></div>
         </div>
 
         <aside class="side">
-          <div class="card">
+          <div class="panel">
             <div id="status" class="status"></div>
             <div id="infoChips" class="chips"></div>
+            <button id="btnPass" class="btn wide hidden">Zug passen <span class="cost">+3</span></button>
           </div>
 
-          <div id="shop" class="card shop">
-            <div class="shop-head">
-              <h3>🛒 Fähigkeiten-Shop</h3>
-              <span id="shopPoints" class="points"></span>
+          <div id="shop" class="panel">
+            <div class="panel-head">
+              <h3>Shop</h3>
+              <span id="shopPoints" class="coins"></span>
             </div>
             <div id="abilities"></div>
             <p id="shopHint" class="hint"></p>
             <button id="btnCancelTarget" class="btn small ghost hidden">Abbrechen</button>
           </div>
 
-          <div class="card">
-            <h3>📜 Was passiert</h3>
+          <div class="panel">
+            <div class="panel-head"><h3>Verlauf</h3></div>
             <ul id="log"></ul>
           </div>
         </aside>
@@ -101,12 +131,12 @@
     </section>
 
     <div id="overlay" class="hidden">
-      <div class="card ov-card">
+      <div class="panel ov-card">
         <h2 id="ovTitle"></h2>
         <p id="ovSub"></p>
         <div class="ov-actions">
-          <button id="btnRematch" class="btn big primary">🔁 Revanche</button>
-          <button id="btnLobby" class="btn ghost">Zur Lobby</button>
+          <button id="btnRematch" class="btn primary wide">Revanche</button>
+          <button id="btnLobby" class="btn ghost wide">Zur Lobby</button>
         </div>
       </div>
     </div>
