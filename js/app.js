@@ -8,6 +8,7 @@
     white: ['#ffffff', '#e6e6e6', '#bdbdbd'], black: ['#1d1d1f', '#4a4a50', '#777'],
     red: ['#e63946', '#ff8a8a', '#ffd0d0'], blue: ['#3a6ff7', '#9db8ff', '#dbe5ff'],
     yellow: ['#f4c430', '#ffe58a', '#fff5cc'], green: ['#2fb36a', '#8fe3b0', '#d5f7e3'],
+    purple: ['#9b5de5', '#c9a8f5', '#f15bb5'],
   };
 
   let state = null;
@@ -15,7 +16,8 @@
   let myIdx = null;
   let selected = null;
   let targeting = null; // { id, step, first }
-  const opts = { mode: 'chaos', teams: false, local: 2 };
+  const opts = { mode: 'chaos', style: 'ffa', local: 2, localBots: 0, startPoints: 0, events: 'normal', clockMin: 0, disabled: [] };
+  let botTimer = null, holdPiece = null, receivedAt = 0;
   let roomCode = '';
   const lobby = []; // Host: [{ name, conn }]
   const pieceEls = new Map();
@@ -42,8 +44,45 @@
     );
   }
   seg('modeSeg', 'mode', (v) => v);
-  seg('teamSeg', 'teams', (v) => v === 'teams');
+  seg('styleSeg', 'style', (v) => {
+    $('#styleHint').textContent = {
+      ffa: 'Wer zuletzt einen König hat, gewinnt.',
+      teams: 'Nur mit 4 Spielern: Gegenüberliegende Spieler sind ein Team.',
+      boss: '1–3 Spieler (oder Bots) gemeinsam gegen eine riesige Boss-Armee.',
+    }[v];
+    return v;
+  });
   seg('localSeg', 'local', (v) => +v);
+  seg('botSeg', 'localBots', (v) => +v);
+  seg('startSeg', 'startPoints', (v) => +v);
+  seg('eventSeg', 'events', (v) => v);
+  seg('clockSeg', 'clockMin', (v) => +v);
+  // Fähigkeiten an/aus
+  const tg = $('#abilityToggles');
+  for (const ab of E.ABILITIES) {
+    const b = document.createElement('button');
+    b.className = 'ab-toggle';
+    b.innerHTML = `<span class="aicon cat-${ab.cat}">${Icons.svg(ab.id)}</span>${ab.name}`;
+    b.title = ab.desc;
+    b.addEventListener('click', () => {
+      const i = opts.disabled.indexOf(ab.id);
+      if (i >= 0) opts.disabled.splice(i, 1); else opts.disabled.push(ab.id);
+      b.classList.toggle('off', i < 0);
+      Sound.play('click');
+    });
+    tg.appendChild(b);
+  }
+  const maxPlayers = () => (opts.style === 'boss' ? 3 : 4);
+  function gameOpts(entries) {
+    return {
+      mode: opts.mode, names: entries.map((e) => e.name), bots: entries.map((e) => !!e.bot),
+      teams: opts.style === 'teams', boss: opts.style === 'boss',
+      startPoints: opts.startPoints, events: opts.events, clockMin: opts.clockMin, disabled: opts.disabled.slice(),
+    };
+  }
+  // Spieler-Index im Spiel für einen Platz im Raum (im Boss-Modus wird umsortiert)
+  const pidx = (lobbyIdx) => (state ? state.players.findIndex((p) => p.src === lobbyIdx) : lobbyIdx);
+  const lidx = (playerIdx) => (state && state.players[playerIdx] ? state.players[playerIdx].src : playerIdx);
 
   const nameInput = $('#playerName');
   try { nameInput.value = localStorage.getItem('gs-name') || ''; } catch (e) {}
@@ -64,25 +103,40 @@
     $('#lobbyMain').classList.add('hidden');
     $('#roomPanel').classList.remove('hidden');
   }
-  function summary(mode, teams) {
-    return (mode === 'chaos' ? 'Chaos' : 'Klassisch') + ' · ' + (teams ? '2 gegen 2' : 'Jeder gegen jeden');
+  function summary(o) {
+    const parts = [o.mode === 'chaos' ? 'Chaos' : 'Klassisch', { ffa: 'Jeder gegen jeden', teams: '2 gegen 2', boss: 'Boss-Kampf' }[o.style] || ''];
+    if (o.startPoints) parts.push(o.startPoints + ' Startpunkte');
+    if (o.clockMin) parts.push(o.clockMin + ' Min');
+    if (o.events && o.events !== 'normal') parts.push('Events: ' + { off: 'aus', rare: 'selten', often: 'oft' }[o.events]);
+    return parts.join(' · ');
   }
 
-  function renderRoom(names, you, mode, teams) {
+  // entries: [{ name, bot }]
+  function renderRoom(entries, you, o) {
+    const max = o.style === 'boss' ? 3 : 4;
     $('#roomCode').textContent = roomCode || '·····';
-    $('#roomSummary').textContent = summary(mode, teams);
-    $('#roomCount').textContent = `(${names.length}/4)`;
-    const colors = { 2: ['white', 'black'], 3: ['red', 'blue', 'yellow'], 4: ['red', 'blue', 'yellow', 'green'] }[Math.max(2, names.length)];
-    const rows = names.map((n, i) => `<li><span class="dot c-${colors[i] || 'white'}"></span>${esc(n)}${i === you ? ' <small>du</small>' : i === 0 ? ' <small>Host</small>' : ''}</li>`);
-    for (let i = names.length; i < 4; i++) rows.push('<li class="empty">Freier Platz</li>');
+    $('#roomSummary').textContent = summary(o);
+    $('#roomCount').textContent = `(${entries.length}/${max})`;
+    const colors = o.style === 'boss' ? ['red', 'blue', 'green'] : { 2: ['white', 'black'], 3: ['red', 'blue', 'yellow'], 4: ['red', 'blue', 'yellow', 'green'] }[Math.max(2, entries.length)];
+    const rows = entries.map((e, i) => {
+      const tag = i === you ? ' <small>du</small>' : i === 0 ? ' <small>Host</small>' : e.bot ? ' <small>Bot</small>' : '';
+      const rm = role === 'host' && e.bot ? `<button class="rm-bot" data-i="${i}" title="Bot entfernen">×</button>` : '';
+      return `<li><span class="dot c-${colors[i] || 'white'}"></span>${esc(e.name)}${tag}${rm}</li>`;
+    });
+    if (o.style === 'boss') rows.push('<li class="boss-row"><span class="dot c-purple"></span>BOSS <small>Gegner</small></li>');
+    for (let i = entries.length; i < max; i++) rows.push('<li class="empty">Freier Platz</li>');
     $('#roomPlayers').innerHTML = rows.join('');
+    document.querySelectorAll('.rm-bot').forEach((b) => b.addEventListener('click', () => { lobby.splice(+b.dataset.i, 1); broadcastLobby(); }));
     if (role === 'host') {
+      const minP = o.style === 'boss' ? 1 : 2;
       $('#btnStart').classList.remove('hidden');
-      $('#btnStart').disabled = names.length < 2;
-      let hint = names.length < 2 ? 'Schick den Link an deine Freunde.' : `${names.length} Spieler bereit.`;
-      if (teams && names.length !== 4) hint += ' 2 gegen 2 braucht 4 Spieler, sonst jeder gegen jeden.';
+      $('#btnStart').disabled = entries.length < minP;
+      $('#btnAddBot').classList.toggle('hidden', entries.length >= max);
+      let hint = entries.length < minP ? 'Schick den Link an deine Freunde oder füge Bots hinzu.' : `${entries.length} Spieler bereit.`;
+      if (o.style === 'teams' && entries.length !== 4) hint += ' 2 gegen 2 braucht 4 Spieler, sonst jeder gegen jeden.';
       $('#roomHint').textContent = hint;
     } else {
+      $('#btnAddBot').classList.add('hidden');
       $('#btnStart').classList.add('hidden');
       $('#linkRow').classList.add('hidden');
       $('#roomHint').textContent = 'Warte, bis der Host das Spiel startet…';
@@ -97,13 +151,20 @@
     lobby.length = 0;
     lobby.push({ name: myName(), conn: null });
     showRoom();
-    renderRoom(lobby.map((p) => p.name), 0, opts.mode, opts.teams);
+    renderRoom(lobby, 0, opts);
     $('#roomHint').textContent = 'Erstelle Raum…';
     Net.host((code) => {
       roomCode = code;
       $('#roomLink').value = location.origin + location.pathname + '?room=' + code;
-      renderRoom(lobby.map((p) => p.name), 0, opts.mode, opts.teams);
+      renderRoom(lobby, 0, opts);
     });
+  });
+  $('#btnAddBot').addEventListener('click', () => {
+    if (role !== 'host' || state || lobby.length >= maxPlayers()) return;
+    const used = lobby.map((p) => p.name);
+    lobby.push({ name: E.BOT_NAMES.find((n) => !used.includes(n)) || 'Bot', bot: true, conn: null, cid: '' });
+    Sound.play('spawn');
+    broadcastLobby();
   });
 
   $('#btnCopy').addEventListener('click', () => {
@@ -128,9 +189,15 @@
 
   $('#btnLocal').addEventListener('click', () => {
     Sound.play('click');
+    const total = opts.local + opts.localBots;
+    const boss = opts.style === 'boss';
+    if (boss ? total > 3 : total < 2 || total > 4)
+      return lobbyStatus(boss ? 'Im Boss-Modus höchstens 3 Spieler + Bots.' : 'Insgesamt braucht es 2–4 Spieler + Bots.', true);
     role = 'local';
-    const colorNames = { 2: ['Weiß', 'Schwarz'], 3: ['Rot', 'Blau', 'Gelb'], 4: ['Rot', 'Blau', 'Gelb', 'Grün'] }[opts.local];
-    state = E.newGame({ mode: opts.mode, teams: opts.teams, names: colorNames });
+    const entries = [];
+    for (let i = 0; i < opts.local; i++) entries.push({ name: opts.local === 1 ? myName() : '' });
+    for (let i = 0; i < opts.localBots; i++) entries.push({ name: E.BOT_NAMES[i], bot: true });
+    state = E.newGame(gameOpts(entries));
     myIdx = state.turn;
     startGame();
     render([startBanner()]);
@@ -139,6 +206,7 @@
   $('#btnLeave').addEventListener('click', () => (location.href = location.pathname));
 
   function startBanner() {
+    if (state.boss) return { type: 'banner', ico: 'boss', title: 'Boss-Kampf!', sub: 'Gemeinsam gegen den Boss-König', sound: 'event' };
     return state.mode === 'chaos'
       ? { type: 'banner', ico: 'fire', title: 'Chaos-Schach!', sub: 'Schlag einen König, um seine Armee zu übernehmen', sound: 'event' }
       : { type: 'banner', ico: 'knight', title: 'Los geht\'s!', sub: state.players.length === 2 ? 'Klassisches Schach' : 'Schlag die Könige deiner Gegner', sound: 'event' };
@@ -146,12 +214,13 @@
 
   // ---------- Host ----------
   function broadcastLobby() {
-    const names = lobby.map((p) => p.name);
-    lobby.forEach((p, i) => p.conn && Net.sendTo(p.conn, { t: 'lobby', names, you: i, code: roomCode, mode: opts.mode, teams: opts.teams }));
-    renderRoom(names, 0, opts.mode, opts.teams);
+    const entries = lobby.map((p) => ({ name: p.name, bot: !!p.bot }));
+    const o = { mode: opts.mode, style: opts.style, startPoints: opts.startPoints, clockMin: opts.clockMin, events: opts.events };
+    lobby.forEach((p, i) => p.conn && Net.sendTo(p.conn, { t: 'lobby', entries, you: i, code: roomCode, o }));
+    renderRoom(entries, 0, opts);
   }
   function broadcastState(fx) {
-    lobby.forEach((p, i) => p.conn && Net.sendTo(p.conn, { t: 'state', s: state, fx, you: i }));
+    lobby.forEach((p, i) => p.conn && Net.sendTo(p.conn, { t: 'state', s: state, fx, you: pidx(i) }));
     saveHost();
   }
   // Host speichert das Spiel, um es nach Neuladen fortsetzen zu können
@@ -159,7 +228,7 @@
     if (role !== 'host' || !state) return;
     try {
       if (state.winners) { localStorage.removeItem('gs-host'); return; }
-      localStorage.setItem('gs-host', JSON.stringify({ code: roomCode, state, lobby: lobby.map((p) => ({ name: p.name, cid: p.cid || '' })), opts, t: Date.now() }));
+      localStorage.setItem('gs-host', JSON.stringify({ code: roomCode, state, lobby: lobby.map((p) => ({ name: p.name, cid: p.cid || '', bot: !!p.bot })), opts, t: Date.now() }));
     } catch (e) {}
   }
   function loadHostSave() {
@@ -171,14 +240,15 @@
   }
   function resumeHost(sv) {
     role = 'host';
-    myIdx = 0;
     roomCode = sv.code;
     Object.assign(opts, sv.opts || {});
     lobby.length = 0;
-    sv.lobby.forEach((p) => lobby.push({ name: p.name, cid: p.cid, conn: null }));
+    sv.lobby.forEach((p) => lobby.push({ name: p.name, cid: p.cid, bot: !!p.bot, conn: null }));
     lobbyStatus('Öffne Raum ' + sv.code + ' wieder… (kann bis zu 40 Sek. dauern)');
     Net.host(() => {
       state = sv.state;
+      myIdx = pidx(0);
+      if (state.clock) state.clock.since = Date.now();
       startGame();
       const fx = [{ type: 'banner', ico: 'plug', title: 'Spiel fortgesetzt', sub: 'Deine Freunde verbinden sich automatisch neu' }];
       render(fx);
@@ -186,8 +256,8 @@
       // Wer nach 45 Sekunden nicht zurück ist, wird übersprungen
       setTimeout(() => {
         const out = [];
-        lobby.forEach((p, i) => { if (i > 0 && !p.conn && !state.players[i].offline) out.push(...(E.setOffline(state, i, true) || [])); });
-        if (out.length || lobby.some((p, i) => i > 0 && !p.conn)) { broadcastState(out); render(out); }
+        lobby.forEach((p, i) => { if (i > 0 && !p.bot && !p.conn && !state.players[pidx(i)].offline) out.push(...(E.setOffline(state, pidx(i), true) || [])); });
+        if (out.length) { broadcastState(out); render(out); }
       }, 45000);
     }, sv.code);
   }
@@ -210,12 +280,12 @@
       if (state) {
         // Wiederverbinden: gleicher Browser-Tab oder gleicher Name auf freiem Platz
         let idx = lobby.findIndex((p, i) => i > 0 && cid && p.cid === cid);
-        if (idx < 0) idx = lobby.findIndex((p, i) => i > 0 && (!p.conn || !p.conn.open) && p.name === name);
+        if (idx < 0) idx = lobby.findIndex((p, i) => i > 0 && !p.bot && (!p.conn || !p.conn.open) && p.name === name);
         if (idx > 0 && (!lobby[idx].conn || !lobby[idx].conn.open || lobby[idx].cid === cid)) {
           lobby[idx].conn = c;
           lobby[idx].cid = cid;
-          const fx = E.setOffline(state, idx, false) || [];
-          fx.push({ type: 'banner', ico: 'plug', title: `${state.players[idx].name} ist zurück!`, sub: 'Weiter geht\'s' });
+          const fx = E.setOffline(state, pidx(idx), false) || [];
+          fx.push({ type: 'banner', ico: 'plug', title: `${state.players[pidx(idx)].name} ist zurück!`, sub: 'Weiter geht\'s' });
           broadcastState(fx);
           render(fx);
           return;
@@ -224,13 +294,13 @@
       }
       const ex = lobby.findIndex((p, i) => i > 0 && cid && p.cid === cid);
       if (ex > 0) { lobby[ex].conn = c; lobby[ex].name = name; }
-      else if (lobby.length >= 4) return reject();
+      else if (lobby.length >= maxPlayers()) return reject();
       else lobby.push({ name, conn: c, cid });
       Sound.play('spawn');
       broadcastLobby();
     } else if (d.t === 'action' && state) {
       const idx = lobby.findIndex((p) => p.conn === c);
-      if (idx > 0) handleAction(d.a, idx);
+      if (idx > 0) handleAction(d.a, pidx(idx));
     }
   };
   Net.onGuestClose = (c) => {
@@ -241,12 +311,13 @@
       broadcastLobby();
     } else {
       lobby[idx].conn = null;
-      const name = state.players[idx].name;
+      const pi = pidx(idx);
+      const name = state.players[pi].name;
       toast(`${name} hat die Verbindung verloren – warte 20 Sek.`, 'plug', 'atk');
       // Kurze Gnadenfrist zum Wiederverbinden, erst dann wird übersprungen
       setTimeout(() => {
-        if (!state || lobby[idx].conn || state.players[idx].offline) return;
-        const fx = E.setOffline(state, idx, true) || [];
+        if (!state || !lobby[idx] || lobby[idx].conn || state.players[pi].offline) return;
+        const fx = E.setOffline(state, pi, true) || [];
         fx.push({ type: 'banner', ico: 'plug', title: `${name} ist weg`, sub: 'Seine Züge werden übersprungen, bis er zurück ist' });
         broadcastState(fx);
         render(fx);
@@ -255,9 +326,10 @@
   };
 
   $('#btnStart').addEventListener('click', () => {
-    if (role !== 'host' || lobby.length < 2) return;
+    if (role !== 'host' || lobby.length < (opts.style === 'boss' ? 1 : 2)) return;
     Sound.play('click');
-    state = E.newGame({ mode: opts.mode, teams: opts.teams, names: lobby.map((p) => p.name) });
+    state = E.newGame(gameOpts(lobby));
+    myIdx = pidx(0);
     startGame();
     const fx = [startBanner()];
     broadcastState(fx);
@@ -272,7 +344,7 @@
       myIdx = d.you;
       roomCode = d.code;
       showRoom();
-      renderRoom(d.names, d.you, d.mode, d.teams);
+      renderRoom(d.entries || [], d.you, d.o || {});
     } else if (d.t === 'state') {
       if (reconnecting) {
         reconnecting = false;
@@ -281,6 +353,8 @@
       }
       state = d.s;
       myIdx = d.you;
+      receivedAt = Date.now();
+      holdPiece = null;
       if ($('#game').classList.contains('hidden')) startGame();
       if (state.turn !== myIdx) { selected = null; targeting = null; }
       if (selected) {
@@ -289,7 +363,7 @@
       }
       render(d.fx || []);
     } else if (d.t === 'full') {
-      lobbyStatus(d.started ? 'Das Spiel in diesem Raum läuft schon.' : 'Dieser Raum ist voll (4/4).', true);
+      lobbyStatus(d.started ? 'Das Spiel in diesem Raum läuft schon.' : 'Dieser Raum ist voll.', true);
       $('#btnJoin').disabled = false;
     }
   };
@@ -335,39 +409,44 @@
 
   // ---------- Aktionen ----------
   const me = () => (role === 'local' ? state.turn : myIdx);
-  const canAct = () => state && !state.winners && state.turn === me() && state.players[me()].alive;
+  const canAct = () => state && !state.winners && state.turn === me() && state.players[me()].alive && !state.players[state.turn].bot;
 
   function dispatch(a) {
     selected = null;
     targeting = null;
     if (role === 'guest') { Net.send({ t: 'action', a }); render([]); }
-    else handleAction(a, role === 'local' ? state.turn : 0);
+    else handleAction(a, role === 'local' ? state.turn : myIdx);
   }
 
   function handleAction(a, who) {
     if (!a || !state) return;
     let fx = null;
+    if (a.type !== 'rematch') E.tickClock(state, Date.now());
     if (a.type === 'move') fx = E.doMove(state, who, a.fr, a.fc, a.tr, a.tc);
     else if (a.type === 'ability') fx = E.useAbility(state, who, a.id, a.target);
+    else if (a.type === 'ult') fx = E.useUltimate(state, who, a.id, a.target);
     else if (a.type === 'pass') fx = E.doPass(state, who);
     else if (a.type === 'rematch') {
       if (!state.winners) return;
       const offline = state.players.map((p) => p.offline);
-      state = E.newGame({ mode: state.mode, teams: state.teams, names: state.players.map((p) => p.name) });
-      offline.forEach((o, i) => { if (o) state.players[i].offline = true; });
+      state = E.newGame(state.opts);
+      offline.forEach((o, i) => { if (o && state.players[i]) state.players[i].offline = true; });
+      if (state.clock) state.clock.since = Date.now();
       fx = [{ type: 'banner', ico: 'rematch', title: 'Revanche!', sub: 'Neues Spiel, neues Chaos', sound: 'event' }];
     }
-    if (!fx) return;
+    if (!fx) return null;
     if (role === 'host') broadcastState(fx);
     if (role === 'local') myIdx = state.turn;
     render(fx);
+    return fx;
   }
 
   // ---------- Spielbildschirm ----------
   function startGame() {
     $('#lobby').classList.add('hidden');
     $('#game').classList.remove('hidden');
-    $('#modeTag').textContent = (state.mode === 'chaos' ? 'Chaos' : 'Klassisch') + ' · ' + state.players.length + ' Spieler' + (state.teams ? ' · Teams' : '');
+    $('#modeTag').textContent = (state.mode === 'chaos' ? 'Chaos' : 'Klassisch') + ' · ' + (state.boss ? 'Boss-Kampf' : state.players.length + ' Spieler' + (state.teams ? ' · Teams' : ''));
+    if (role !== 'guest' && state.clock && state.clock.since == null) state.clock.since = Date.now();
     $('#modeTag').classList.remove('hidden');
   }
 
@@ -393,7 +472,12 @@
   }
 
   function quarter() {
-    const base = role === 'local' ? 0 : SEAT_ROT[state.players[myIdx].seat];
+    let base;
+    if (role === 'local') {
+      // Allein gegen Bots: Brett zur eigenen Seite drehen
+      const humans = state.players.filter((p) => !p.bot);
+      base = humans.length === 1 ? SEAT_ROT[humans[0].seat] : 0;
+    } else base = SEAT_ROT[state.players[myIdx].seat];
     return (base + state.rot) % 4;
   }
   function toView(r, c) {
@@ -411,9 +495,16 @@
     return [n - 1 - vc, vr];
   }
 
+  function isTarget(t, r, c) {
+    return t.ult ? E.valid(state, r, c) : E.validTarget(state, me(), t.id, r, c, t.step);
+  }
   function onSquare(r, c) {
     Sound.init();
-    if (!canAct()) return;
+    if (suppressClick || !canAct()) return;
+    if (targeting && targeting.ult) {
+      if (E.valid(state, r, c)) dispatch({ type: 'ult', id: targeting.id, target: { r, c } });
+      return;
+    }
     if (targeting) {
       const t = targeting;
       if (!E.validTarget(state, me(), t.id, r, c, t.step)) return;
@@ -464,6 +555,24 @@
     renderPieces(hints);
     renderPanels();
     processFx(fx);
+    scheduleBot();
+  }
+
+  // Computergegner ziehen beim Host bzw. lokal
+  function scheduleBot() {
+    if (role === 'guest' || !state || state.winners) return;
+    const cur = state.players[state.turn];
+    if (!cur || !cur.bot || !cur.alive) return;
+    clearTimeout(botTimer);
+    const turnKey = state.ply + ':' + state.turn + ':' + state.abilityUsed + ':' + state.ultUsed;
+    botTimer = setTimeout(() => {
+      if (!state || state.winners || state.ply + ':' + state.turn + ':' + state.abilityUsed + ':' + state.ultUsed !== turnKey) return;
+      const who = state.turn;
+      // Abgelehnte Aktion: normal ziehen, sonst passen
+      if (handleAction(E.botAction(state, who), who)) return;
+      if (handleAction(E.botAction(state, who, true), who)) return;
+      handleAction({ type: 'pass' }, who);
+    }, cur.boss ? 900 : 650 + Math.random() * 500);
   }
 
   function renderBoard() {
@@ -491,7 +600,7 @@
       if (targeting && targeting.first && targeting.first.r === r && targeting.first.c === c) cls += ' sel';
       if (moves.some((m) => m.r === r && m.c === c)) cls += state.board[r][c] ? ' move cap' : ' move';
       if (kings.has(r + ',' + c)) cls += ' check';
-      if (targeting && E.validTarget(state, mine, targeting.id, r, c, targeting.step)) cls += ' tgt';
+      if (targeting && isTarget(targeting, r, c)) cls += ' tgt';
       if (canAct() && !targeting && state.board[r][c] && state.board[r][c].owner === mine) cls += ' own';
       el.className = cls;
     });
@@ -532,6 +641,8 @@
           el.style.transition = '';
           pieceEls.set(p.id, el);
           if (!firstRender) restartAnim(el.firstChild, hints.drop.has(key) ? 'drop' : src ? 'ghost' : 'spawn');
+        } else if (holdPiece === p.id) {
+          // Gezogene Figur wartet auf die Antwort des Hosts
         } else if (el.style.transform !== tf) {
           if (hints.warp.has(key)) {
             el.style.transition = 'none';
@@ -544,7 +655,7 @@
             restartAnim(el, 'landing');
           }
         }
-        el.style.transform = tf;
+        if (holdPiece !== p.id) el.style.transform = tf;
         el.dataset.pos = r + ',' + c;
         if (el.dataset.type !== p.type) {
           if (el.dataset.type) restartAnim(el.firstChild, 'morph');
@@ -562,6 +673,7 @@
         el.classList.toggle('frozen', isFrozen);
         el.lastChild.textContent = isPoison ? '🧪' : isFrozen ? '❄️' : '';
         el.classList.toggle('king-danger', p.type === 'k' && state.check.includes(p.owner));
+        el.classList.toggle('boss-king', p.type === 'k' && !!p.maxHp);
       }
     for (const [id, el] of pieceEls) {
       if (seen.has(id)) continue;
@@ -594,17 +706,26 @@
         if (state.skip === i) badges.push('<span class="pb gray">setzt aus</span>');
         if (pl.offline) badges.push('<span class="pb gray">offline</span>');
       }
-      const tag = role !== 'local' && i === myIdx ? ' <small>du</small>' : state.teams ? ` <small>T${pl.team + 1}</small>` : '';
+      const tag = role !== 'local' && i === myIdx ? ' <small>du</small>' : pl.bot && !pl.boss ? ' <small>Bot</small>' : state.teams && !state.boss ? ` <small>T${pl.team + 1}</small>` : '';
       const cls = ['pl', 'c-' + pl.color];
       if (pl.alive && !state.winners && state.turn === i) cls.push('active');
       if (!pl.alive) cls.push('dead');
-      return `<div class="${cls.join(' ')}"><span class="dot"></span><span class="pn">${esc(pl.name)}${tag}</span>${badges.join('')}${chaos ? `<span class="pp">${pl.points} 🪙</span>` : ''}</div>`;
+      if (pl.boss) cls.push('boss');
+      let extra = '';
+      if (pl.boss) {
+        const k = state.board.flat().find((p) => p && p.owner === i && p.maxHp);
+        if (k) extra += `<span class="hp">${'<b>♥</b>'.repeat(k.hp)}${'<i>♥</i>'.repeat(k.maxHp - k.hp)}</span>`;
+      }
+      if (state.clock) extra += `<span class="pt" data-i="${i}"></span>`;
+      const ult = chaos && !pl.boss ? `<span class="ub${pl.ult >= 100 ? ' full' : ''}" style="width:${pl.ult || 0}%"></span>` : '';
+      return `<div class="${cls.join(' ')}"><span class="dot"></span><span class="pn">${esc(pl.name)}${tag}</span>${badges.join('')}${extra}${chaos ? `<span class="pp">${pl.points} 🪙</span>` : ''}${ult}</div>`;
     }).join('');
 
     // Status
     const cur = state.players[state.turn];
     let st;
     if (state.winners) st = state.winners.length ? `${state.winners.map((i) => state.players[i].name).join(' & ')} gewinnt!` : 'Unentschieden';
+    else if (cur.bot) st = `${cur.name} denkt nach…`;
     else if (role === 'local') st = `${cur.name} ist dran`;
     else if (!state.players[myIdx].alive) st = `Du bist raus · ${cur.name} ist dran`;
     else st = state.turn === myIdx ? 'Du bist dran' : `${cur.name} ist dran`;
@@ -613,8 +734,10 @@
 
     const info = [];
     if (chaos && !state.winners) {
-      const left = state.eventEvery - (state.ply % state.eventEvery);
-      info.push(`<span class="chip">Event in ${left} Zug${left === 1 ? '' : 'en'}</span>`);
+      if (state.eventEvery) {
+        const left = state.eventEvery - (state.ply % state.eventEvery);
+        info.push(`<span class="chip">Event in ${left} Zug${left === 1 ? '' : 'en'}</span>`);
+      }
       if (state.ply < state.doubleUntil) info.push('<span class="chip gold">Doppelte Punkte</span>');
       if (state.bonus) info.push('<span class="chip gold">Extra-Zug · Könige tabu</span>');
       if (state.lava.length) info.push('<span class="chip orange">Lava</span>');
@@ -627,6 +750,8 @@
     }
     renderConn();
     $('#infoChips').innerHTML = info.join('');
+    renderUlt();
+    updateClocks();
 
     const pass = $('#btnPass');
     if (!pass.dataset.ico) { pass.insertAdjacentHTML('afterbegin', Icons.svg('pass', 'btn-ico')); pass.dataset.ico = 1; }
@@ -659,6 +784,7 @@
         b.querySelector('.acost').textContent = cost;
         b.classList.toggle('sale', cost < ab.cost);
         b.disabled = !canAct() || state.abilityUsed || pts < cost || !!E.abilityBlocked(state, mine, ab.id);
+        b.classList.toggle('hidden', !!(state.disabled && state.disabled.includes(ab.id)));
         b.classList.toggle('armed', !!targeting && targeting.id === ab.id);
       }
       renderHint();
@@ -713,13 +839,154 @@
     return `${awards.length ? `<ul class="awards">${awards.join('')}</ul>` : ''}<table class="stats">${head}${rows}</table>${favHtml}`;
   }
 
+  // ---------- Ultimate ----------
+  function renderUlt() {
+    const box = $('#ultBox');
+    const mine = state.players[me()];
+    const show = state.mode === 'chaos' && mine && !mine.boss && !state.winners;
+    box.classList.toggle('hidden', !show);
+    if (!show) return;
+    const pct = Math.min(100, mine.ult || 0);
+    $('#ultFill').style.width = pct + '%';
+    $('#ultPct').textContent = pct >= 100 ? 'BEREIT!' : pct + '%';
+    box.classList.toggle('ready', pct >= 100);
+    const btns = $('#ultBtns');
+    if (!btns.children.length) {
+      for (const u of E.ULTIMATES) {
+        const b = document.createElement('button');
+        b.className = 'ult-btn';
+        b.dataset.id = u.id;
+        b.title = u.desc;
+        b.innerHTML = `${Icons.svg('ult-' + u.id)}<span>${u.name}</span>`;
+        b.addEventListener('click', () => {
+          if (!canAct()) return;
+          Sound.init();
+          selected = null;
+          if (u.target) { targeting = targeting && targeting.ult ? null : { id: u.id, ult: true, step: 1 }; Sound.play('click'); render([]); }
+          else dispatch({ type: 'ult', id: u.id });
+        });
+        b.addEventListener('mouseenter', () => { $('#shopHint').innerHTML = `<b>${u.name}</b><br>${esc(u.desc)}`; });
+        btns.appendChild(b);
+      }
+    }
+    for (const b of btns.children) {
+      b.disabled = !canAct() || pct < 100 || state.ultUsed;
+      b.classList.toggle('armed', !!targeting && targeting.ult && targeting.id === b.dataset.id);
+    }
+  }
+
+  // ---------- Schachuhr ----------
+  function timeLeft(i) {
+    const cl = state.clock;
+    let left = cl.left[i];
+    if (!state.winners && i === state.turn) {
+      if (role === 'guest') left -= Date.now() - receivedAt;
+      else if (cl.since != null) left -= Date.now() - cl.since;
+    }
+    return Math.max(0, left);
+  }
+  function updateClocks() {
+    if (!state || !state.clock) return;
+    document.querySelectorAll('#players .pt').forEach((el) => {
+      const i = +el.dataset.i;
+      const ms = timeLeft(i);
+      const sec = Math.ceil(ms / 1000);
+      el.textContent = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+      el.classList.toggle('low', sec <= 20 && state.players[i].alive);
+    });
+  }
+  setInterval(() => {
+    if (!state || !state.clock || state.winners) return;
+    updateClocks();
+    if (role === 'guest') return;
+    if (timeLeft(state.turn) <= 0) {
+      E.tickClock(state, Date.now());
+      const fx = E.timeOut(state, state.turn);
+      if (role === 'host') broadcastState(fx);
+      if (role === 'local') myIdx = state.turn;
+      render(fx);
+    }
+  }, 250);
+
+  // ---------- Drag & Drop ----------
+  let drag = null, suppressClick = false;
+  function sqAt(x, y) {
+    const el = document.elementFromPoint(x, y);
+    const sq = el && el.closest ? el.closest('.sq') : null;
+    if (!sq || sq.classList.contains('void') || sq.dataset.r === undefined) return null;
+    return [+sq.dataset.r, +sq.dataset.c];
+  }
+  $('#board').addEventListener('pointerdown', (e) => {
+    if (!state || !canAct() || targeting || e.button > 0) return;
+    const sq = e.target.closest('.sq');
+    if (!sq || sq.dataset.r === undefined) return;
+    const r = +sq.dataset.r, c = +sq.dataset.c;
+    const p = state.board[r] && state.board[r][c];
+    if (!p || p.owner !== me()) return;
+    const el = pieceEls.get(p.id);
+    if (el) drag = { r, c, el, id: p.id, x: e.clientX, y: e.clientY, active: false, over: null };
+  });
+  window.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    if (!drag.active) {
+      if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 7) return;
+      drag.active = true;
+      selected = { r: drag.r, c: drag.c };
+      renderBoard();
+      drag.el.classList.add('dragging');
+      Sound.play('click');
+    }
+    const br = $('#board').getBoundingClientRect();
+    const size = br.width / state.n;
+    drag.el.style.transform = `translate(${e.clientX - br.left - size / 2}px, ${e.clientY - br.top - size * 0.6}px)`;
+    const t = sqAt(e.clientX, e.clientY);
+    const key = t ? t.join(',') : null;
+    if (key !== drag.over) {
+      document.querySelectorAll('.sq.hover').forEach((x) => x.classList.remove('hover'));
+      if (t) {
+        const [vr, vc] = toView(t[0], t[1]);
+        const el = squares[vr * state.n + vc];
+        if (el && el.classList.contains('move')) el.classList.add('hover');
+      }
+      drag.over = key;
+    }
+  });
+  function endDrag(e) {
+    if (!drag) return;
+    const d = drag;
+    drag = null;
+    document.querySelectorAll('.sq.hover').forEach((x) => x.classList.remove('hover'));
+    if (!d.active) return;
+    suppressClick = true;
+    setTimeout(() => (suppressClick = false), 60);
+    d.el.classList.remove('dragging');
+    const t = e && e.type === 'pointerup' ? sqAt(e.clientX, e.clientY) : null;
+    if (t && state && E.legalMoves(state, d.r, d.c).some((m) => m.r === t[0] && m.c === t[1])) {
+      const [vr, vc] = toView(t[0], t[1]);
+      d.el.style.transition = 'none';
+      d.el.style.transform = `translate(${vc * 100}%, ${vr * 100}%)`;
+      void d.el.offsetWidth;
+      d.el.style.transition = '';
+      restartAnim(d.el, 'landing');
+      if (role === 'guest') holdPiece = d.id;
+      dispatch({ type: 'move', fr: d.r, fc: d.c, tr: t[0], tc: t[1] });
+    } else {
+      selected = null;
+      render([]);
+    }
+  }
+  window.addEventListener('pointerup', endDrag);
+  window.addEventListener('pointercancel', endDrag);
+
   function showDesc(ab) {
     $('#shopHint').innerHTML = `<b>${ab.name} · ${state ? E.abilityCost(state, ab.id) : ab.cost} 🪙</b><br>${esc(ab.desc)}`;
   }
   function renderHint() {
     if (!state) return;
     let hint;
-    if (targeting) {
+    if (targeting && targeting.ult) {
+      hint = '<b>Atombombe</b><br>Wähle das Zentrum der Explosion (5×5 Felder).';
+    } else if (targeting) {
       const ab = E.ABILITIES.find((a) => a.id === targeting.id);
       const what = {
         square: 'ein Feld', own: 'eine eigene Figur', ownAny: 'eine eigene Figur', ownPawn: 'einen eigenen Bauern',
@@ -769,10 +1036,14 @@
   function shake(strong) {
     restartAnim($('#boardWrap'), strong ? 'shake-strong' : 'shake');
   }
+  // Effekte dürfen den Spielablauf nie unterbrechen
+  function safeFx(f) {
+    try { runFx(f); } catch (e) { console.warn('Effekt-Fehler', f.type, e); }
+  }
   function processFx(fx) {
     for (const f of fx) {
-      if (f.delay) setTimeout(() => runFx(f), f.delay);
-      else runFx(f);
+      if (f.delay) setTimeout(() => safeFx(f), f.delay);
+      else safeFx(f);
     }
   }
 
@@ -1010,6 +1281,41 @@
         break;
       }
       case 'coins': Sound.play('coin'); break;
+      case 'bossHit': {
+        const from = center(f.fr, f.fc);
+        FX.burst(from[0], from[1], { n: 70, colors: ['#9b5de5', '#f15bb5', '#ffffff', '#c77dff'], speed: 10, size: 7, glow: true });
+        FX.ring(from[0], from[1], 'rgba(155,93,229,', sq * 3, { width: 12 });
+        FX.flash('#c77dff');
+        Sound.play('bosshit');
+        shake(true);
+        setTimeout(() => { const to = center(f.r, f.c); FX.implode(to[0], to[1], ['#9b5de5', '#f15bb5', '#ffffff']); }, 200);
+        break;
+      }
+      case 'nukeDrop': {
+        const from = (f.who !== undefined && chipCenter(f.who)) || [pos[0], pos[1] - 300];
+        Sound.play('siren');
+        FX.lob(from[0], from[1], pos[0], pos[1], 62);
+        break;
+      }
+      case 'nuke': {
+        FX.flash('#ffffff');
+        FX.explosion(pos[0], pos[1], true);
+        setTimeout(() => FX.explosion(pos[0], pos[1], true), 120);
+        FX.ring(pos[0], pos[1], 'rgba(255,255,255,', sq * 6, { width: 18, len: 45 });
+        FX.ring(pos[0], pos[1], 'rgba(255,214,10,', sq * 4, { width: 14, len: 40 });
+        FX.burst(pos[0], pos[1], { n: 60, colors: ['#555', '#777', '#999'], speed: 4, size: 26, life: 150, grav: -0.07, drag: 0.96 });
+        scorch(f.r, f.c, 5);
+        Sound.play('nuke');
+        shake(true);
+        setTimeout(() => shake(true), 400);
+        break;
+      }
+      case 'armor':
+        FX.ring(pos[0], pos[1], 'rgba(244,196,48,', sq * 2, { width: 12, len: 45 });
+        FX.ring(pos[0], pos[1], 'rgba(255,255,255,', sq, { from: sq * 3, len: 25 });
+        FX.burst(pos[0], pos[1], { n: 40, colors: ['#f4c430', '#fff3b0', '#ffffff'], speed: 5, size: 5, glow: true, grav: -0.04 });
+        Sound.play('shield');
+        break;
       case 'ruleEnd': {
         const def = E.RULES.find((x) => x.id === f.id);
         if (def) toast(`${def.name} ist vorbei`, 'rule-' + f.id, 'ctrl');
@@ -1033,6 +1339,7 @@
     bBusy = true;
     const el = $('#banner');
     el.classList.toggle('rule', !!f.rule);
+    el.classList.toggle('ult', !!f.ult);
     el.innerHTML = `<div class="bicon">${f.ico ? Icons.svg(f.ico) : esc(f.icon || '')}</div><div class="btitle">${esc(f.title)}</div><div class="bsub">${esc(f.sub || '')}</div>`;
     restartAnim(el, 'show');
     if (f.sound) Sound.play(f.sound);

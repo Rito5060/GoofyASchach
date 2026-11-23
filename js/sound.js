@@ -94,6 +94,10 @@
     clone() { tone(600, 0.12, { type: 'triangle', vol: 0.15 }); tone(600, 0.12, { type: 'triangle', vol: 0.15, at: 0.12 }); },
     revive() { [523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, 0.3, { type: 'sine', vol: 0.12, at: i * 0.07 })); },
     thud() { tone(120, 0.15, { type: 'sine', to: 50, vol: 0.3 }); noise(0.08, { freq: 400, vol: 0.2 }); },
+    ult() { [392, 523, 659, 784, 1047].forEach((f, i) => tone(f, 0.25, { type: 'sawtooth', vol: 0.09, at: i * 0.07 })); noise(0.6, { filter: 'bandpass', freq: 500, freqTo: 3000, vol: 0.25 }); },
+    siren() { tone(600, 0.5, { type: 'sine', to: 1000, vol: 0.12 }); tone(1000, 0.5, { type: 'sine', to: 600, vol: 0.12, at: 0.5 }); },
+    nuke() { noise(2.2, { freq: 2500, freqTo: 40, vol: 1 }); tone(60, 2, { type: 'sine', to: 18, vol: 0.7 }); tone(40, 2, { type: 'sawtooth', to: 15, vol: 0.25 }); },
+    bosshit() { tone(220, 0.4, { type: 'square', to: 55, vol: 0.25 }); noise(0.5, { freq: 1200, vol: 0.5 }); tone(330, 0.3, { type: 'sawtooth', to: 110, vol: 0.15, at: 0.1 }); },
     click() { tone(700, 0.04, { type: 'square', vol: 0.08 }); },
   };
 

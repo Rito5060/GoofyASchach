@@ -23,11 +23,12 @@
       <div class="lobby-grid">
         <div class="intro">
           <h1>Schach,<br>aber kaputt.</h1>
-          <p>Spiel mit bis zu drei Freunden. Sammle Punkte, kauf dir Bomben, Blitze und Teleporter, und überleb Meteoriten, Lava und Eis.</p>
+          <p>Spiel mit bis zu drei Freunden oder gegen Bots. Sammle Punkte, kauf dir Bomben, Blitze und Teleporter, überleb Meteoriten und Lava – oder kämpft gemeinsam gegen den Boss.</p>
           <ul class="facts">
-            <li><b>2–4</b><span>Spieler</span></li>
+            <li><b>1–4</b><span>Spieler + Bots</span></li>
             <li><b>19</b><span>Fähigkeiten</span></li>
-            <li><b>11</b><span>Chaos-Events</span></li>
+            <li><b>17</b><span>Events &amp; Regeln</span></li>
+            <li><b>3</b><span>Ultimates</span></li>
           </ul>
         </div>
 
@@ -51,12 +52,40 @@
           </div>
 
           <div class="field">
-            <span>Spielart <small>(2 gegen 2 nur mit 4 Spielern)</small></span>
-            <div class="seg" id="teamSeg">
+            <span>Spielart</span>
+            <div class="seg" id="styleSeg">
               <button data-v="ffa" class="on">Jeder gegen jeden</button>
               <button data-v="teams">2 gegen 2</button>
+              <button data-v="boss">Boss</button>
             </div>
+            <small id="styleHint" class="hint-line">Wer zuletzt einen König hat, gewinnt.</small>
           </div>
+
+          <details class="settings">
+            <summary>Einstellungen</summary>
+            <div class="field">
+              <span>Startpunkte</span>
+              <div class="seg small" id="startSeg">
+                <button data-v="0" class="on">0</button><button data-v="5">5</button><button data-v="10">10</button><button data-v="20">20</button>
+              </div>
+            </div>
+            <div class="field">
+              <span>Chaos-Events</span>
+              <div class="seg small" id="eventSeg">
+                <button data-v="off">Aus</button><button data-v="rare">Selten</button><button data-v="normal" class="on">Normal</button><button data-v="often">Oft</button>
+              </div>
+            </div>
+            <div class="field">
+              <span>Schachuhr <small>(Minuten pro Spieler)</small></span>
+              <div class="seg small" id="clockSeg">
+                <button data-v="0" class="on">Aus</button><button data-v="3">3</button><button data-v="5">5</button><button data-v="10">10</button>
+              </div>
+            </div>
+            <div class="field">
+              <span>Fähigkeiten <small>(antippen zum Ausschalten)</small></span>
+              <div id="abilityToggles"></div>
+            </div>
+          </details>
 
           <button id="btnCreate" class="btn primary wide">Raum erstellen</button>
           <div class="join">
@@ -66,13 +95,18 @@
 
           <div class="divider"><span>oder an einem Gerät</span></div>
           <div class="local">
-            <div class="seg small" id="localSeg">
-              <button data-v="2" class="on">2</button>
-              <button data-v="3">3</button>
-              <button data-v="4">4</button>
+            <div class="local-opt"><span>Spieler</span>
+              <div class="seg small" id="localSeg">
+                <button data-v="1">1</button><button data-v="2" class="on">2</button><button data-v="3">3</button><button data-v="4">4</button>
+              </div>
             </div>
-            <button id="btnLocal" class="btn">Lokal spielen</button>
+            <div class="local-opt"><span>Bots</span>
+              <div class="seg small" id="botSeg">
+                <button data-v="0" class="on">0</button><button data-v="1">1</button><button data-v="2">2</button><button data-v="3">3</button>
+              </div>
+            </div>
           </div>
+          <button id="btnLocal" class="btn wide">Lokal spielen</button>
           <p id="lobbyStatus" class="status-msg"></p>
         </div>
 
@@ -90,6 +124,7 @@
             <span>Spieler <small id="roomCount"></small></span>
             <ul id="roomPlayers"></ul>
           </div>
+          <button id="btnAddBot" class="btn small hidden">+ Bot hinzufügen</button>
           <p id="roomHint" class="status-msg"></p>
           <button id="btnStart" class="btn primary wide hidden">Spiel starten</button>
           <button id="btnLeave" class="btn ghost wide">Verlassen</button>
@@ -116,6 +151,11 @@
             <div id="status" class="status"></div>
             <div id="infoChips" class="chips"></div>
             <div id="connState" class="conn hidden"></div>
+            <div id="ultBox" class="ult hidden">
+              <div class="ult-head"><span>Ultimate</span><span id="ultPct">0%</span></div>
+              <div class="ult-bar"><i id="ultFill"></i></div>
+              <div id="ultBtns" class="ult-btns"></div>
+            </div>
             <button id="btnPass" class="btn wide hidden">Zug passen <span class="cost">+3</span></button>
           </div>
 

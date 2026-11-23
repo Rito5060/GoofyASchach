@@ -47,6 +47,11 @@
   P['rule-sprint'] = `<path ${F} d="M7 18.5 6 9l4 3.5L13 6l3 6.5 4-3.5-1 9.5z"/><path ${S} d="M2 8h2.5M1.5 12h3M2 16h2.5"/>`;
   P['rule-sale'] = `<path ${F} d="M3 3h8.5l9.5 9.5-8.5 8.5L3 11.5z"/><circle fill="#000" opacity=".4" cx="7.5" cy="7.5" r="1.8"/><path stroke="#000" stroke-opacity=".4" stroke-width="2" stroke-linecap="round" d="M10 15l5-5"/>`;
   for (const k of ['backpawns', 'knights', 'ghost', 'peace', 'sprint', 'sale']) P[k] = P['rule-' + k];
+  P.boss = `<path ${F} d="M12 2C7 2 3.5 5.5 3.5 10.5c0 3 1.3 5.3 3.5 6.7V21h10v-3.8c2.2-1.4 3.5-3.7 3.5-6.7C20.5 5.5 17 2 12 2z"/><path fill="#000" opacity=".55" d="M6.8 9.5 10.5 11 9 13.2zM17.2 9.5 13.5 11 15 13.2z"/><path stroke="#000" stroke-opacity=".55" stroke-width="1.6" d="M9.5 17v4M12 17v4M14.5 17v4"/><path ${F} d="M4 4 2 1l4 2zM20 4l2-3-4 2z"/>`;
+  P.clock = `<circle ${S} cx="12" cy="13" r="8.5"/><path ${S} d="M12 8.5V13l3 2M9.5 2h5"/>`;
+  P['ult-nuke'] = `<circle ${F} cx="12" cy="12" r="2.6"/><path ${F} d="M12 9.4 8.2 3a10 10 0 0 1 7.6 0zM14.3 13.3l7.4.1a10 10 0 0 1-3.8 6.6zM9.7 13.3 6.1 20a10 10 0 0 1-3.8-6.6z"/>`;
+  P['ult-army2'] = `<circle ${F} cx="7.5" cy="7" r="2.8"/><path ${F} d="M4.2 18c0-3.5 1.2-5.7 3.3-7.2 2.1 1.5 3.3 3.7 3.3 7.2z"/><circle ${F} cx="16.5" cy="7" r="2.8"/><path ${F} d="M13.2 18c0-3.5 1.2-5.7 3.3-7.2 2.1 1.5 3.3 3.7 3.3 7.2z"/><rect ${F} x="2.5" y="18" width="19" height="3" rx="1"/>`;
+  P['ult-armor'] = `<path ${F} d="M12 1.5 21 5v7c0 5.5-3.8 9.6-9 10.9C6.8 21.6 3 17.5 3 12V5z"/><path fill="#000" opacity=".35" d="M7.5 15.5 7 9.5l2.6 2L12 7.5l2.4 4 2.6-2-.5 6z"/>`;
   P.mutation = P.mutate;
   P.quakeEv = P.quake;
 

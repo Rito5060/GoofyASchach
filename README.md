@@ -1,6 +1,6 @@
 # GoofyASchach
 
-Chaos-Schach für 2–4 Freunde im Browser, gehostet auf GitHub Pages.
+Chaos-Schach für bis zu 4 Freunde oder gegen Computergegner im Browser, gehostet auf GitHub Pages.
 
 ## Spielen
 1. Seite öffnen, Namen eingeben, **Raum erstellen**.
@@ -11,6 +11,13 @@ Mit 2 Spielern wird auf dem normalen 8×8-Brett gespielt, mit 3–4 auf dem 14×
 
 Wer die Verbindung verliert, wird automatisch neu verbunden (oder öffnet den Link erneut) und landet wieder auf seinem Platz. Lädt der Host die Seite neu, kann er das laufende Spiel fortsetzen.
 
+## Spielarten
+- **Jeder gegen jeden** oder **2 gegen 2** (bei 4 Spielern).
+- **Boss-Kampf:** 1–3 Spieler oder Bots gemeinsam gegen eine lila Boss-Armee. Der Boss-König hat mehrere Leben, flieht nach jedem Treffer und greift regelmäßig mit Feuerregen, Fluch oder Dienern an.
+- **Bots:** Im Raum fügt der Host Bots hinzu, lokal wählt man die Anzahl.
+- **Einstellungen:** Startpunkte, Häufigkeit der Events, Schachuhr und einzelne Fähigkeiten an oder aus.
+- Figuren lassen sich anklicken oder per **Drag & Drop** ziehen.
+
 ## Regeln im Chaos-Modus
 - Wer einen König schlägt, wirft den Spieler raus und **übernimmt seine ganze Armee**. Der letzte König (bzw. das letzte Team) gewinnt.
 - Punkte: +1 pro Zug, Figurenwert fürs Schlagen (Bauer 1, Springer/Läufer 3, Turm 5, Dame 9). **Zug passen** bringt +3.
@@ -18,6 +25,7 @@ Wer die Verbindung verliert, wird automatisch neu verbunden (oder öffnet den Li
 - Fähigkeiten können Könige nicht direkt töten. Im Extra-Zug nach einem **Zug-Skip** darf kein König geschlagen werden, und Skip lässt sich nicht stapeln.
 - Alle zwei Runden ein **Chaos-Event**: Meteoriten, Lava, Eis, Brett-Drehung, doppelte Punkte, Bauern-Sturm, Platztausch, Geschenk, Mutations-Welle, Erdbeben, Frost.
 - Oder ein **Regel-Event**, das ein paar Züge lang gilt: Rückwärts-Bauern, Springer-Fieber, Geister-Modus, Friedenszeit, Königs-Sprint, Ausverkauf.
+- **Ultimates:** Kills und Verluste laden eine Leiste auf. Voll gibt es eine Super-Fähigkeit: Atombombe (5×5), Klon-Armee oder Königs-Rüstung.
 - Am Ende gibt es eine **Statistik** mit Auszeichnungen.
 
 Im klassischen Modus mit 2 Spielern gilt normales Schach mit Schachmatt.

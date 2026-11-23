@@ -89,6 +89,7 @@
     if (s.log.length > 100) s.log.shift();
   }
   const pname = (s, i) => s.players[i].name;
+  const zum = (t) => (t === 'q' ? 'zur Dame' : 'zum ' + NAMES[t]);
 
   function valid(s, r, c) {
     if (r < 0 || c < 0 || r >= s.n || c >= s.n) return false;
@@ -103,25 +104,52 @@
   const frozen = (s, p) => p && p.frozen > s.ply;
   const aliveCount = (s) => s.players.filter((p) => p.alive).length;
 
+  const BOT_NAMES = ['Bot Bernd', 'Bot Brigitte', 'Bot Kevin', 'Bot Uschi'];
+  const ULTIMATES = [
+    { id: 'nuke', name: 'Atombombe', target: 'square', desc: 'Löscht ein 5×5-Feld aus. Nur Könige überleben.' },
+    { id: 'army2', name: 'Klon-Armee', desc: 'Bis zu 8 deiner Bauern bekommen einen Zwilling.' },
+    { id: 'armor', name: 'Königs-Rüstung', desc: 'Dein König ist 3 Runden lang unverwundbar.' },
+  ];
+  const EVENT_RATE = { off: 0, rare: 4, normal: 2, often: 1 };
+
+  // opts: { mode, names, bots[], teams, boss, startPoints, events, disabled[], clockMin }
   function newGame(opts) {
     const names = opts.names;
-    const count = names.length;
-    const teams = !!opts.teams && count === 4;
-    const seats = SEATS_BY_COUNT[count];
-    const colors = COLORS_BY_COUNT[count];
-    const n = count === 2 ? 8 : 14;
+    const bots = opts.bots || [];
+    const boss = !!opts.boss;
+    let list; // in Zugreihenfolge S, W, N, E
+    if (boss) {
+      const hs = { 1: ['S'], 2: ['W', 'E'], 3: ['W', 'S', 'E'] }[Math.min(3, Math.max(1, names.length))];
+      const hc = ['red', 'blue', 'green'];
+      const people = names.slice(0, 3).map((n, i) => ({ name: n, bot: !!bots[i], seat: hs[i], color: hc[i], team: 0, src: i }));
+      people.push({ name: 'BOSS', bot: true, boss: true, seat: 'N', color: 'purple', team: 1, src: -1 });
+      const order = { S: 0, W: 1, N: 2, E: 3 };
+      list = people.sort((x, y) => order[x.seat] - order[y.seat]);
+    } else {
+      const count = names.length;
+      const teams = !!opts.teams && count === 4;
+      list = names.map((n, i) => ({
+        name: n, bot: !!bots[i], seat: SEATS_BY_COUNT[count][i], color: COLORS_BY_COUNT[count][i], src: i,
+        team: teams ? (SEATS_BY_COUNT[count][i] === 'S' || SEATS_BY_COUNT[count][i] === 'N' ? 0 : 1) : i,
+      }));
+    }
+    const count = list.length;
+    const n = !boss && count === 2 ? 8 : 14;
+    const evRate = EVENT_RATE[opts.events || 'normal'];
     const s = {
-      mode: opts.mode, n, teams,
-      players: names.map((name, i) => ({
-        name: name || COLOR_NAMES[colors[i]], seat: seats[i], color: colors[i], alive: true, offline: false,
-        team: teams ? (seats[i] === 'S' || seats[i] === 'N' ? 0 : 1) : i, points: 0, lost: [], stats: newStats(),
+      mode: opts.mode, n, teams: boss || (!!opts.teams && count === 4), boss,
+      players: list.map((p) => ({
+        name: p.name || COLOR_NAMES[p.color], seat: p.seat, color: p.color, alive: true, offline: false,
+        team: p.team, bot: !!p.bot, boss: !!p.boss, src: p.src, points: opts.startPoints || 0, ult: 0, lost: [], stats: newStats(),
       })),
       board: [], turn: 0, ep: null, ply: 0, lava: [], ice: [], doubleUntil: 0, rot: 0,
-      skip: null, bonus: false, abilityUsed: false, winners: null, result: null, rules: [],
-      log: [], nextId: 1, lastMove: null, check: [], eventEvery: count * 2,
+      skip: null, bonus: false, abilityUsed: false, ultUsed: false, winners: null, result: null, rules: [],
+      log: [], nextId: 1, lastMove: null, check: [], eventEvery: count * evRate, bossTurns: 0,
+      disabled: (opts.disabled || []).slice(), clock: null,
     };
+    s.opts = JSON.parse(JSON.stringify(opts));
+    if (opts.clockMin) s.clock = { left: s.players.map(() => opts.clockMin * 60000), since: null, total: opts.clockMin * 60000 };
     for (let r = 0; r < n; r++) s.board.push(Array(n).fill(null));
-    const idx = (seat) => seats.indexOf(seat);
     if (n === 8) {
       const back = 'rnbqkbnr';
       for (let c = 0; c < 8; c++) {
@@ -131,17 +159,33 @@
         s.board[7][c] = mk(s, back[c], 0);
       }
     } else {
-      const backS = 'rnbqkbnr', backN = 'rnbkqbnr';
-      for (let k = 0; k < 8; k++) {
+      // Feld relativ zur Seite: d = Abstand vom Rand, k = Position entlang der Seite (0..7)
+      const put = (seat, d, k, type, owner, moved) => {
         const x = 3 + k;
-        if (idx('S') >= 0) { s.board[13][x] = mk(s, backS[k], idx('S')); s.board[12][x] = mk(s, 'p', idx('S')); }
-        if (idx('N') >= 0) { s.board[0][x] = mk(s, backN[k], idx('N')); s.board[1][x] = mk(s, 'p', idx('N')); }
-        if (idx('W') >= 0) { s.board[x][0] = mk(s, backN[k], idx('W')); s.board[x][1] = mk(s, 'p', idx('W')); }
-        if (idx('E') >= 0) { s.board[x][13] = mk(s, backS[k], idx('E')); s.board[x][12] = mk(s, 'p', idx('E')); }
-      }
+        const pos = { S: [13 - d, x], N: [d, x], W: [x, d], E: [x, 13 - d] }[seat];
+        const pc = mk(s, type, owner, moved);
+        s.board[pos[0]][pos[1]] = pc;
+        return pc;
+      };
+      s.players.forEach((pl, i) => {
+        const back = pl.seat === 'S' || pl.seat === 'E' ? 'rnbqkbnr' : 'rnbkqbnr';
+        if (pl.boss) {
+          // Boss wächst mit der Spielerzahl: Leben = Spieler + 1, ab 2 Spielern eine Extra-Reihe
+          const humans = s.players.length - 1;
+          const b0 = 'rnbqkbnr', b1 = 'rbnqqnbr';
+          for (let k = 0; k < 8; k++) {
+            const pc = put('N', 0, k, b0[k], i);
+            if (pc.type === 'k') { pc.hp = humans + 1; pc.maxHp = humans + 1; }
+            if (humans >= 2) { put('N', 1, k, b1[k], i, true); put('N', 2, k, 'p', i, true); }
+            else put('N', 1, k, 'p', i);
+          }
+        } else {
+          for (let k = 0; k < 8; k++) { put(pl.seat, 0, k, back[k], i); put(pl.seat, 1, k, 'p', i); }
+        }
+      });
     }
     const modeTxt = opts.mode === 'chaos' ? '🔥 CHAOS-MODUS' : '♟️ Klassisch';
-    log(s, `${modeTxt} mit ${count} Spielern${teams ? ' (2 gegen 2)' : ''} gestartet!`);
+    log(s, boss ? `${modeTxt}: BOSS-KAMPF! Besiegt den Boss-König (${count} Leben).` : `${modeTxt} mit ${count} Spielern${s.teams ? ' (2 gegen 2)' : ''} gestartet!`);
     return s;
   }
 
@@ -295,11 +339,15 @@
     s.players[who].points += amt;
     s.players[who].stats.earned += amt;
   }
+  function charge(s, who, n) {
+    if (s.mode !== 'chaos' || !s.players[who] || s.players[who].boss) return;
+    s.players[who].ult = Math.min(100, (s.players[who].ult || 0) + n);
+  }
   function delayFrom(fx, i, d) {
     for (; i < fx.length; i++) fx[i].delay = (fx[i].delay || 0) + d;
   }
   function lose(s, p) {
-    if (p && p.type !== 'k' && s.players[p.owner]) { s.players[p.owner].lost.push(p.type); s.players[p.owner].stats.lost++; }
+    if (p && p.type !== 'k' && s.players[p.owner]) { s.players[p.owner].lost.push(p.type); s.players[p.owner].stats.lost++; charge(s, p.owner, 8); }
   }
   function destroy(s, r, c, fx, kind, by) {
     const p = at(s, r, c);
@@ -307,7 +355,7 @@
     lose(s, p);
     s.board[r][c] = null;
     fx.push({ type: 'capture', r, c, color: s.players[p.owner].color, kind });
-    if (by !== undefined && !ally(s, p.owner, by)) { gain(s, by, Math.ceil(VAL[p.type] / 2)); s.players[by].stats.kills++; }
+    if (by !== undefined && !ally(s, p.owner, by)) { gain(s, by, Math.ceil(VAL[p.type] / 2)); s.players[by].stats.kills++; charge(s, by, 10); }
     return true;
   }
   function atEdge(s, p, r, c) {
@@ -321,7 +369,7 @@
     p.type = pick(opts);
     if (p.type === 'p') p.moved = true;
     fx.push({ type: 'mutate', r, c });
-    log(s, `🧬 ${NAMES[old]} von ${pname(s, p.owner)} wird zum ${NAMES[p.type]}!`);
+    log(s, `🧬 ${NAMES[old]} von ${pname(s, p.owner)} wird ${zum(p.type)}!`);
   }
   // Nach Chaos aufräumen: Bauern am Rand befördern, Lava verbrennt
   function normalize(s, fx) {
@@ -372,14 +420,44 @@
     log(s, `💀 ${v.name} ist raus! ${pname(s, killer)} übernimmt ${n} Figuren${loot ? ` und ${loot} Punkte` : ''}.`);
     fx.push({ type: 'banner', ico: 'skull', title: `${v.name} ist raus!`, sub: `${pname(s, killer)} übernimmt die Armee`, sound: 'event' });
 
+    checkWin(s, fx);
+  }
+  function checkWin(s, fx) {
     const teamsLeft = [...new Set(s.players.filter((p) => p.alive).map((p) => p.team))];
-    if (teamsLeft.length <= 1) {
-      s.winners = s.players.map((p, i) => i).filter((i) => s.players[i].team === teamsLeft[0]);
-      s.result = s.teams ? 'Das Team hat alle Könige erledigt! 👑' : 'Der letzte König steht! 👑';
-      log(s, `🏆 ${s.winners.map((i) => pname(s, i)).join(' & ')} gewinnt!`);
-      fx.push({ type: 'win' });
-      s.check = [];
+    if (teamsLeft.length > 1) return;
+    s.winners = s.players.map((p, i) => i).filter((i) => s.players[i].team === teamsLeft[0]);
+    if (s.boss) s.result = s.players[s.winners[0]] && s.players[s.winners[0]].boss ? 'Der Boss hat alle besiegt. 👾' : 'Der Boss ist besiegt! 🎉';
+    else s.result = s.teams ? 'Das Team hat alle Könige erledigt! 👑' : 'Der letzte König steht! 👑';
+    log(s, `🏆 ${s.winners.map((i) => pname(s, i)).join(' & ')} gewinnt!`);
+    fx.push({ type: 'win' });
+    s.check = [];
+  }
+  // Zeit abgelaufen: Spieler fliegt raus, seine Figuren verschwinden
+  function timeOut(s, who) {
+    const fx = [];
+    if (s.winners || !s.players[who] || !s.players[who].alive) return fx;
+    const pl = s.players[who];
+    pl.alive = false;
+    for (const { p, r, c } of allPieces(s, (p) => p.owner === who)) {
+      s.board[r][c] = null;
+      fx.push({ type: 'capture', r, c, color: pl.color, kind: 'boom' });
     }
+    log(s, `⏰ Die Zeit von ${pl.name} ist abgelaufen!`);
+    fx.push({ type: 'banner', ico: 'clock', title: `${pl.name}: Zeit um!`, sub: 'Die Armee löst sich auf', sound: 'event' });
+    checkWin(s, fx);
+    if (!s.winners && s.turn === who) {
+      s.ply--;
+      const m = s.mode;
+      s.mode = 'classic-skip';
+      endTurn(s, fx);
+      s.mode = m;
+    }
+    return fx;
+  }
+  function tickClock(s, now) {
+    if (!s.clock || s.winners) return;
+    if (s.clock.since != null) s.clock.left[s.turn] = Math.max(0, s.clock.left[s.turn] - (now - s.clock.since));
+    s.clock.since = now;
   }
 
   // ---------- Zug ausführen ----------
@@ -416,7 +494,21 @@
       gain(s, who, VAL[captured.type]);
       log(s, `⚔️ ${NAMES[p.type]} von ${pname(s, who)} schlägt ${NAMES[captured.type]} von ${pname(s, captured.owner)}` +
         (s.mode === 'chaos' && VAL[captured.type] ? ` (+${VAL[captured.type] * mult})` : ''));
-      if (captured.type === 'k') eliminate(s, captured.owner, who, fx);
+      if (captured.type === 'k' && captured.hp > 1) {
+        // Boss-König verliert ein Leben und flieht
+        captured.hp--;
+        s.players[who].stats.kings--;
+        const spots = emptySquares(s, (r, c) => r <= 4 && !attackedBy(s, r, c, captured.owner));
+        const spot = spots.length ? pick(spots) : pick(emptySquares(s));
+        s.board[spot.r][spot.c] = captured;
+        charge(s, who, 30);
+        fx.push({ type: 'bossHit', r: spot.r, c: spot.c, fr: tr, fc: tc, hp: captured.hp });
+        fx.push({ type: 'banner', ico: 'boss', title: 'Boss getroffen!', sub: `Noch ${captured.hp} Leben`, sound: 'event' });
+        log(s, `💥 ${pname(s, who)} trifft den Boss! Noch ${captured.hp} Leben.`);
+      } else {
+        charge(s, who, captured.type === 'k' ? 50 : 25);
+        if (captured.type === 'k') eliminate(s, captured.owner, who, fx);
+      }
     } else fx.push({ type: 'move' });
 
     // Eis: weiterrutschen
@@ -435,7 +527,13 @@
     s.lastMove = { fr, fc, tr: cr, tc: cc };
     normalize(s, fx);
     if (s.winners) { s.ply++; return fx; }
-    gain(s, who, 1);
+    const humans = s.players.length - 1;
+    gain(s, who, s.players[who].boss ? (humans >= 2 ? 3 : 1) : 1);
+    if (s.players[who].boss && s.mode === 'chaos') {
+      s.bossTurns++;
+      if (s.bossTurns % (humans >= 2 ? 2 : 3) === 0) bossAttack(s, who, fx);
+      if (s.winners) { s.ply++; return fx; }
+    }
     endTurn(s, fx);
     return fx;
   }
@@ -443,6 +541,7 @@
   function endTurn(s, fx) {
     s.ply++;
     s.abilityUsed = false;
+    s.ultUsed = false;
     s.bonus = false;
     s.lava = s.lava.filter((x) => x.until > s.ply);
     s.ice = s.ice.filter((x) => x.until > s.ply);
@@ -457,7 +556,7 @@
       p.shield = 0;
       if (destroy(s, r, c, fx, 'poison')) log(s, `🧪 ${NAMES[p.type]} von ${pname(s, p.owner)} erliegt dem Gift!`);
     }
-    if (s.mode === 'chaos' && s.ply % s.eventEvery === 0) randomEvent(s, fx);
+    if (s.mode === 'chaos' && s.eventEvery && s.ply % s.eventEvery === 0) randomEvent(s, fx);
 
     const cur = s.turn;
     let next = nextAlive(s, cur);
@@ -552,6 +651,7 @@
   }
 
   function abilityBlocked(s, who, id) {
+    if (s.disabled && s.disabled.includes(id)) return 'Deaktiviert';
     if (id === 'skip' && (s.bonus || aliveCount(s) < 2)) return 'Im Extra-Zug nicht erlaubt';
     if (id === 'revive' && !s.players[who].lost.length) return 'Keine verlorenen Figuren';
     if (id === 'steal' && !s.players.some((p, i) => p.alive && !ally(s, i, who) && p.points >= 4)) return 'Kein Gegner hat genug Punkte';
@@ -781,7 +881,7 @@
     const freeRules = RULES.filter((r) => !rule(s, r.id));
     if (freeRules.length && Math.random() < 0.45) {
       const rl = pick(freeRules);
-      const dur = Math.max(4, s.eventEvery);
+      const dur = Math.max(4, s.players.length * 2);
       s.rules.push({ id: rl.id, until: s.ply + dur });
       fx.push({ type: 'banner', ico: 'rule-' + rl.id, title: rl.name, sub: `${rl.desc} (${dur} Züge)`, sound: 'event', rule: true });
       log(s, `${rl.icon} REGEL: ${rl.name} – ${dur} Züge lang!`);
@@ -869,7 +969,194 @@
     s.ep = null;
   }
 
+  // ---------- Ultimates ----------
+  function useUltimate(s, who, id, target) {
+    const fx = [];
+    const me = s.players[who];
+    if (s.mode !== 'chaos' || s.winners || s.turn !== who || s.ultUsed || (me.ult || 0) < 100) return null;
+    const u = ULTIMATES.find((x) => x.id === id);
+    if (!u) return null;
+    if (u.target && (!target || !valid(s, target.r, target.c))) return null;
+    switch (id) {
+      case 'nuke': {
+        fx.push({ type: 'nukeDrop', r: target.r, c: target.c, who });
+        const i0 = fx.length;
+        fx.push({ type: 'nuke', r: target.r, c: target.c });
+        let n = 0;
+        for (let dr = -2; dr <= 2; dr++)
+          for (let dc = -2; dc <= 2; dc++) if (destroy(s, target.r + dr, target.c + dc, fx, 'boom', who)) n++;
+        delayFrom(fx, i0, 1100);
+        log(s, `☢️ ${me.name} zündet die ATOMBOMBE! ${n} Figuren verdampft.`);
+        break;
+      }
+      case 'army2': {
+        let n = 0;
+        for (const { p, r, c } of shuffle(allPieces(s, (p) => p.owner === who && p.type === 'p'))) {
+          if (n >= 8) break;
+          const spot = shuffle(K8.map(([a, b]) => ({ r: r + a, c: c + b }))).find(({ r: rr, c: cc }) => valid(s, rr, cc) && !s.board[rr][cc] && !isLava(s, rr, cc));
+          if (!spot) continue;
+          const cl = mk(s, 'p', who, true);
+          cl.dir = p.dir.slice();
+          if (atEdge(s, cl, spot.r, spot.c)) cl.type = 'q';
+          s.board[spot.r][spot.c] = cl;
+          fx.push({ type: 'clone', r: spot.r, c: spot.c, fr: r, fc: c });
+          n++;
+        }
+        log(s, `👥 ${me.name} ruft die KLON-ARMEE! ${n} neue Bauern.`);
+        break;
+      }
+      case 'armor': {
+        const k = kingPos(s, who);
+        if (!k) return null;
+        s.board[k[0]][k[1]].shield = s.ply + aliveCount(s) * 3;
+        fx.push({ type: 'armor', r: k[0], c: k[1] });
+        log(s, `🛡️ ${me.name} legt die KÖNIGS-RÜSTUNG an!`);
+        break;
+      }
+    }
+    me.ult = 0;
+    s.ultUsed = true;
+    fx.unshift({ type: 'banner', ico: 'ult-' + id, title: u.name.toUpperCase() + '!', sub: me.name, sound: 'ult', ult: true });
+    normalize(s, fx);
+    updateCheck(s);
+    return fx;
+  }
+
+  // ---------- Boss-Angriffe ----------
+  function bossAttack(s, boss, fx) {
+    const humans = allPieces(s, (p) => !ally(s, p.owner, boss) && p.type !== 'k' && !shielded(s, p));
+    const kind = pick(['meteor', 'summon', 'curse']);
+    if (kind === 'meteor' && humans.length) {
+      fx.push({ type: 'banner', ico: 'boss', title: 'Boss-Angriff!', sub: 'Feuerregen auf eure Figuren', sound: 'event' });
+      shuffle(humans).slice(0, Math.min(3, s.players.length)).forEach(({ p, r, c }, i) => {
+        const d = 600 + i * 400;
+        fx.push({ type: 'meteor', r, c, delay: d });
+        lose(s, p);
+        s.board[r][c] = null;
+        fx.push({ type: 'capture', r, c, color: s.players[p.owner].color, kind: 'boom', delay: d + 400 });
+      });
+      log(s, '👾 Der Boss lässt Feuer regnen!');
+    } else if (kind === 'curse' && humans.length) {
+      fx.push({ type: 'banner', ico: 'boss', title: 'Boss-Fluch!', sub: 'Vier eurer Figuren frieren ein', sound: 'event' });
+      for (const { p, r, c } of shuffle(humans).slice(0, 4)) {
+        p.frozen = s.ply + aliveCount(s) + 1;
+        fx.push({ type: 'freeze', r, c });
+      }
+      log(s, '👾 Der Boss verflucht eure Figuren!');
+    } else {
+      const k = kingPos(s, boss);
+      const near = k ? shuffle(emptySquares(s, (r, c) => Math.abs(r - k[0]) <= 2 && Math.abs(c - k[1]) <= 2)) : [];
+      const sq = near.slice(0, 3);
+      for (const { r, c } of sq) {
+        s.board[r][c] = mk(s, pick(['n', 'b', 'p', 'p']), boss, true);
+        fx.push({ type: 'spawn', r, c, kind: 'drop' });
+      }
+      fx.push({ type: 'banner', ico: 'boss', title: 'Boss ruft Diener!', sub: `${sq.length} neue Figuren`, sound: 'event' });
+      log(s, `👾 Der Boss beschwört ${sq.length} Diener!`);
+    }
+    normalize(s, fx);
+  }
+
+  // ---------- Computergegner ----------
+  function simAttacked(s, board, r, c, owner) {
+    return attackedBy(Object.assign({}, s, { board }), r, c, owner);
+  }
+  function scoreMove(s, who, fr, fc, m) {
+    const p = s.board[fr][fc];
+    const t = s.board[m.r][m.c];
+    let sc = 0;
+    if (t) sc += t.type === 'k' ? (t.hp > 1 ? 60 : 1000) : VAL[t.type] * 10;
+    const b = s.board.map((row) => row.slice());
+    b[m.r][m.c] = p;
+    b[fr][fc] = null;
+    if (m.ep) b[s.ep.vr][s.ep.vc] = null;
+    const v = p.type === 'k' ? 40 : VAL[p.type];
+    if (simAttacked(s, b, m.r, m.c, who) && !shielded(s, p)) sc -= v * 9;
+    else if (simAttacked(s, s.board, fr, fc, who)) sc += v * 4; // Figur gerettet
+    if (p.type !== 'k') {
+      const k = kingPos(s, who);
+      if (k && simAttacked(s, b, k[0], k[1], who)) sc -= 300;
+    }
+    if (isLava(s, m.r, m.c) && p.type !== 'k') sc -= v * 10;
+    const mid = (s.n - 1) / 2;
+    sc -= (Math.abs(m.r - mid) + Math.abs(m.c - mid)) * 0.15;
+    if (p.type === 'p') sc += 0.4;
+    if (p.type === 'k' && !t) sc -= 1.5;
+    return sc + Math.random() * 1.2;
+  }
+  function enemyValueAround(s, who, r, c, rad) {
+    let v = 0;
+    for (let dr = -rad; dr <= rad; dr++)
+      for (let dc = -rad; dc <= rad; dc++) {
+        const p = at(s, r + dr, c + dc);
+        if (!p || p.type === 'k' || shielded(s, p)) continue;
+        v += ally(s, p.owner, who) ? -VAL[p.type] * 1.3 : VAL[p.type];
+      }
+    return v;
+  }
+  function botAbility(s, who) {
+    if (s.mode !== 'chaos' || s.abilityUsed) return null;
+    const me = s.players[who];
+    const can = (id) => !abilityBlocked(s, who, id) && me.points >= abilityCost(s, id);
+    const cands = [];
+    const enemiesP = allPieces(s, (p) => !ally(s, p.owner, who) && p.type !== 'k' && !shielded(s, p));
+    const k = kingPos(s, who);
+    if (k && inCheck(s, who) && can('shield')) cands.push({ sc: 50, a: { type: 'ability', id: 'shield', target: { r: k[0], c: k[1] } } });
+    if (can('sniper') && enemiesP.length) {
+      const t = enemiesP.sort((x, y) => VAL[y.p.type] - VAL[x.p.type])[0];
+      if (VAL[t.p.type] >= 5) cands.push({ sc: VAL[t.p.type] - abilityCost(s, 'sniper') * 0.5, a: { type: 'ability', id: 'sniper', target: { r: t.r, c: t.c } } });
+    }
+    if (can('bomb')) {
+      let best = null;
+      for (const sq of validSquares(s)) {
+        const v = enemyValueAround(s, who, sq.r, sq.c, 1);
+        if (!best || v > best.v) best = { v, sq };
+      }
+      if (best && best.v >= 7) cands.push({ sc: best.v - abilityCost(s, 'bomb') * 0.5, a: { type: 'ability', id: 'bomb', target: best.sq } });
+    }
+    if (can('promote')) {
+      const pw = allPieces(s, (p) => p.owner === who && p.type === 'p');
+      if (pw.length) cands.push({ sc: 6 - abilityCost(s, 'promote') * 0.4, a: { type: 'ability', id: 'promote', target: { r: pw[0].r, c: pw[0].c } } });
+    }
+    if (can('chain') && enemiesP.length >= 3) cands.push({ sc: 4, a: { type: 'ability', id: 'chain' } });
+    if (can('blitz') && enemiesP.length) cands.push({ sc: 2, a: { type: 'ability', id: 'blitz' } });
+    if (can('army')) cands.push({ sc: 1.5, a: { type: 'ability', id: 'army' } });
+    if (can('revive') && me.lost.some((t) => VAL[t] >= 5)) cands.push({ sc: 3, a: { type: 'ability', id: 'revive' } });
+    cands.forEach((c) => (c.sc += Math.random() * 2));
+    cands.sort((x, y) => y.sc - x.sc);
+    return cands.length && cands[0].sc > 2 ? cands[0].a : null;
+  }
+  function botAction(s, who, plain) {
+    const me = s.players[who];
+    if (s.winners || s.turn !== who) return null;
+    // Ultimate
+    if (!plain && s.mode === 'chaos' && !s.ultUsed && (me.ult || 0) >= 100) {
+      const k = kingPos(s, who);
+      if (k && inCheck(s, who)) return { type: 'ult', id: 'armor' };
+      let best = null;
+      for (const sq of validSquares(s)) {
+        const v = enemyValueAround(s, who, sq.r, sq.c, 2);
+        if (!best || v > best.v) best = { v, sq };
+      }
+      if (best && best.v >= 8) return { type: 'ult', id: 'nuke', target: best.sq };
+      return { type: 'ult', id: allPieces(s, (p) => p.owner === who && p.type === 'p').length >= 3 ? 'army2' : 'armor' };
+    }
+    if (!plain && Math.random() < 0.7) {
+      const ab = botAbility(s, who);
+      if (ab) return ab;
+    }
+    let best = null;
+    for (const { r, c } of allPieces(s, (p) => p.owner === who))
+      for (const m of legalMoves(s, r, c)) {
+        const sc = scoreMove(s, who, r, c, m);
+        if (!best || sc > best.sc) best = { sc, a: { type: 'move', fr: r, fc: c, tr: m.r, tc: m.c } };
+      }
+    if (s.mode === 'chaos' && (!best || (best.sc < -6 && Math.random() < 0.4))) return { type: 'pass' };
+    return best ? best.a : { type: 'pass' };
+  }
+
   window.Engine = {
+    ULTIMATES, BOT_NAMES, useUltimate, botAction, timeOut, tickClock,
     newGame, legalMoves, RULES, rule, abilityCost, doMove, doPass, PASS_POINTS, useAbility, validTarget, abilityBlocked, setOffline, valid,
     ABILITIES, EVENTS, NAMES, VAL, COLOR_NAMES, isLava, isIce, shielded, frozen,
   };

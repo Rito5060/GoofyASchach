@@ -402,3 +402,60 @@ table.stats td:first-child { display: flex; align-items: center; gap: 8px; font-
 .fav b { color: var(--text); }
 .fav .aicon { width: 30px; height: 30px; font-size: 18px; }
 @media (max-width: 480px) { .awards { grid-template-columns: 1fr; } }
+
+/* ---------- Boss, Bots, Einstellungen, Ultimate, Uhr, Drag ---------- */
+.c-purple { --pc: #9b5de5; --po: #250b45; }
+.hint-line { color: var(--muted); font-size: 13px; }
+.settings { margin: 4px 0 18px; border: 2px solid var(--line); border-radius: var(--r); padding: 0 14px; }
+.settings[open] { padding-bottom: 4px; }
+.settings summary { cursor: pointer; font-weight: 700; padding: 12px 0; color: var(--muted); list-style: none; display: flex; justify-content: space-between; }
+.settings summary::after { content: '+'; font-size: 18px; line-height: 1; }
+.settings[open] summary::after { content: '–'; }
+.settings summary::-webkit-details-marker { display: none; }
+#abilityToggles { display: flex; flex-wrap: wrap; gap: 6px; }
+.ab-toggle { display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px 4px 4px; border-radius: 8px; border: 2px solid var(--line); background: var(--surface2); color: var(--text); font-size: 12px; font-weight: 700; cursor: pointer; }
+.ab-toggle .aicon { width: 22px; height: 22px; font-size: 13px; border-radius: 6px; }
+.ab-toggle.off { opacity: .4; text-decoration: line-through; }
+.ab-toggle.off .aicon { background: var(--line); }
+.local { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+.local-opt { display: flex; flex-direction: column; gap: 6px; }
+.local-opt > span { font-size: 12px; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+.local .seg { width: 100%; }
+#btnAddBot { margin: 0 0 6px; }
+.rm-bot { margin-left: 8px; border: 0; background: var(--surface2); color: var(--muted); width: 24px; height: 24px; border-radius: 6px; cursor: pointer; font-weight: 700; }
+.rm-bot:hover { color: var(--text); background: var(--danger); }
+#roomPlayers li.boss-row { border-color: #9b5de5; color: #c9a8f5; }
+
+.pl { overflow: hidden; }
+.pl .ub { position: absolute; left: 0; bottom: 0; height: 3px; background: #c7c3ff; transition: width .5s; }
+.pl .ub.full { background: var(--gold); animation: pulse .8s infinite; }
+.pl.active::before { z-index: 1; }
+.pl.boss { border-color: #9b5de5; }
+.hp { font-size: 13px; letter-spacing: 1px; white-space: nowrap; }
+.hp b { color: #f15bb5; font-weight: 400; }
+.hp i { color: var(--line); font-style: normal; }
+.pt { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 13px; color: var(--muted); background: var(--bg); padding: 2px 6px; border-radius: 5px; }
+.pl.active .pt { color: var(--text); }
+.pt.low { color: #fff; background: var(--danger); }
+
+.ult { margin-top: 14px; }
+.ult-head { display: flex; justify-content: space-between; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 6px; }
+.ult.ready .ult-head span:last-child { color: var(--gold); }
+.ult-bar { height: 10px; border-radius: 6px; background: var(--bg); border: 2px solid var(--line); overflow: hidden; }
+.ult-bar i { display: block; height: 100%; width: 0; background: #c7c3ff; transition: width .5s; }
+.ult.ready .ult-bar i { background: var(--gold); }
+.ult-btns { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 8px; }
+.ult-btn { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 4px; border-radius: var(--r); border: 2px solid var(--line); background: var(--surface2); color: var(--text); font-size: 11px; font-weight: 700; cursor: pointer; }
+.ult-btn .ico { width: 22px; height: 22px; color: var(--gold); }
+.ult-btn:disabled { opacity: .35; cursor: not-allowed; }
+.ult-btn:disabled .ico { color: var(--muted); }
+.ult.ready .ult-btn:not(:disabled) { border-color: var(--gold); animation: pulse 1.2s infinite; }
+.ult-btn.armed { background: #3d3315; }
+#banner.ult { box-shadow: 8px 8px 0 var(--gold); }
+#banner.ult .bicon { background: var(--gold); color: #2b2100; }
+
+.piece.boss-king span { font-size: calc(110cqw / var(--n)); filter: drop-shadow(0 0 calc(4cqw / var(--n)) #f15bb5); }
+.piece.dragging { transition: none !important; z-index: 20; }
+.piece.dragging span { transform: scale(1.18); filter: drop-shadow(0 calc(6cqw / var(--n)) calc(4cqw / var(--n)) rgba(0,0,0,.4)); }
+.sq.own { touch-action: none; }
+.sq.hover .mk { background-color: rgba(58, 111, 247, .35); box-shadow: inset 0 0 0 .5cqw #3a6ff7; }
